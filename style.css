@@ -1,39 +1,60 @@
-:root { --gold: #f1c40f; --blue: #3498db; --red: #e74c3c; --green: #2ecc71; --bg: rgba(20, 25, 30, 0.95); --mana: #00a8ff; }
-body { margin: 0; overflow: hidden; background: #111; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; user-select: none; touch-action: none; -webkit-tap-highlight-color: transparent; }
+:root { 
+    --gold: #f1c40f; 
+    --blue: #3498db; 
+    --red: #e74c3c; 
+    --green: #2ecc71; 
+    --bg: rgba(20, 25, 30, 0.95); 
+    --mana: #00a8ff; 
+    --ui-scale: 1; 
+}
+
+/* Cập nhật Body: Đặt nền trong suốt để tránh che mất Canvas 3D nếu có lỗi */
+body { 
+    margin: 0; 
+    overflow: hidden; 
+    background: #000; /* Màu nền dự phòng */
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+    color: white; 
+    user-select: none; 
+    touch-action: none; 
+    -webkit-tap-highlight-color: transparent; 
+}
+
 .hidden { display: none !important; }
 
 /* Font chữ tự động co giãn theo chiều cao màn hình */
-html { font-size: clamp(10px, 2.5vh, 16px); }
+html { font-size: calc(clamp(10px, 2.5vh, 16px) * var(--ui-scale)); }
 
 #ui-overlay { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; z-index: 1000; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); pointer-events: auto; }
 #main-menu { background: var(--bg); padding: 2rem; border: 2px solid var(--gold); border-radius: 1rem; text-align: center; width: 80%; max-width: 350px; }
 .game-title { color: var(--gold); font-size: 1.8rem; margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 2px; }
 .btn-primary { background: linear-gradient(180deg, #f1c40f, #b7950b); border: none; padding: 1rem 0; width: 100%; font-weight: bold; cursor: pointer; color: #000; font-size: 1.2rem; border-radius: 0.5rem; box-shadow: 0 4px 0 #7f6a00; transition: transform 0.1s; }
-.btn-primary:active { transform: translateY(4px); box-shadow: 0 1px 0 #7f6a00; }
+.btn-primary:active { transform: translateY(4px); box-shadow: 1px 0 #7f6a00; }
 
 #game-ui { position: absolute; inset: 0; pointer-events: none; z-index: 50; }
 
-/* --- CẬP NHẬT: ITEM TOOLTIP --- */
+/* --- ITEM TOOLTIP --- */
 #item-tooltip {
-    position: fixed; /* Cố định vị trí để đi theo chuột */
+    position: fixed; 
     background: rgba(10, 15, 20, 0.95);
     border: 1px solid #777;
     border-radius: 6px;
     padding: 10px;
-    pointer-events: none; /* QUAN TRỌNG: Không chặn click chuột */
-    z-index: 2000; /* Cao hơn tất cả */
+    pointer-events: none; 
+    z-index: 2000; 
     display: flex; flex-direction: column; gap: 5px;
     min-width: 140px;
+    max-width: 200px;
     box-shadow: 0 5px 20px rgba(0,0,0,0.8);
     backdrop-filter: blur(4px);
     transition: opacity 0.1s;
 }
 #tooltip-header { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #444; padding-bottom: 5px; }
-#tooltip-icon { width: 24px; height: 24px; display: flex; justify-content: center; align-items: center; background: #222; border-radius: 3px; border: 1px solid #555; font-size: 1.2rem; }
+#tooltip-icon { width: 24px; height: 24px; display: flex; justify-content: center; align-items: center; background: #222; border-radius: 3px; border: 1px solid #555; font-size: 1.2rem; flex-shrink: 0; }
 #tooltip-name { color: var(--gold); font-weight: bold; font-size: 0.9rem; }
 #tooltip-stats { color: #ccc; font-size: 0.8rem; line-height: 1.4; white-space: pre-line; }
 
-/* --- SIDEBAR PANEL (Tộc hệ & Túi đồ gộp chung) --- */
+/* --- SIDEBAR PANEL --- */
 #sidebar-panel {
     position: absolute; top: 10px; left: 10px;
     width: clamp(160px, 20vw, 220px);
@@ -44,10 +65,11 @@ html { font-size: clamp(10px, 2.5vh, 16px); }
     box-shadow: 0 4px 10px rgba(0,0,0,0.5);
     transition: opacity 0.2s;
     pointer-events: auto;
+    max-height: 80vh; 
 }
 #unit-inspector:not(.hidden) ~ #sidebar-panel { opacity: 0; pointer-events: none; }
 
-.sidebar-tabs { display: flex; border-bottom: 1px solid #444; }
+.sidebar-tabs { display: flex; border-bottom: 1px solid #444; flex-shrink: 0; }
 .tab-btn {
     flex: 1; background: transparent; border: none; padding: 8px 0;
     color: #888; cursor: pointer; font-weight: bold; font-size: 0.8rem;
@@ -56,7 +78,7 @@ html { font-size: clamp(10px, 2.5vh, 16px); }
 .tab-btn:hover { background: rgba(255,255,255,0.05); color: #ccc; }
 .tab-btn.active { background: rgba(241, 196, 15, 0.1); color: var(--gold); border-bottom: 2px solid var(--gold); }
 
-.tab-content { padding: 8px; min-height: 80px; max-height: 40vh; overflow-y: auto; }
+.tab-content { padding: 8px; flex: 1; overflow-y: auto; min-height: 0; }
 
 .trait-box { display: flex; align-items: center; background: rgba(0,0,0,0.4); padding: 5px; margin-bottom: 4px; border-radius: 4px; border-left: 3px solid #555; font-size: 0.7rem; gap: 6px; opacity: 0.8; }
 .trait-box.active { opacity: 1; border-color: var(--gold); background: rgba(200,180,0,0.15); }
@@ -68,44 +90,67 @@ html { font-size: clamp(10px, 2.5vh, 16px); }
 
 /* --- UNIT INSPECTOR --- */
 #unit-inspector { 
-    position: absolute; top: 0; left: 0; bottom: 0; 
+    position: absolute; top: 10px; left: 10px; 
+    max-height: calc(100vh - 20px); 
     width: clamp(180px, 22vw, 260px);
-    background: rgba(12, 16, 20, 0.98); border-right: 1px solid var(--gold);
+    background: rgba(12, 16, 20, 0.98); border: 1px solid #444; border-right: 1px solid var(--gold);
+    border-radius: 8px;
     padding: 0.8rem; box-sizing: border-box;
     display: flex; flex-direction: column; gap: 0.8rem; 
     z-index: 300; pointer-events: auto;
-    box-shadow: 5px 0 25px rgba(0,0,0,0.9);
+    box-shadow: 5px 5px 25px rgba(0,0,0,0.9);
     animation: slideIn 0.2s ease-out;
+    overflow: hidden; 
 }
 @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
 
-#btn-close-inspector { position: absolute; top: 0.5rem; right: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid #444; border-radius: 4px; color: #999; width: 1.8rem; height: 1.8rem; cursor: pointer; display: flex; justify-content: center; align-items: center; }
+#btn-close-inspector { position: absolute; top: 0.5rem; right: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid #444; border-radius: 4px; color: #999; width: 1.8rem; height: 1.8rem; cursor: pointer; display: flex; justify-content: center; align-items: center; z-index: 10; }
 #btn-close-inspector:hover { background: #e74c3c; border-color: #e74c3c; color: white; }
 
-#inspector-header { display: flex; align-items: center; gap: 0.8rem; border-bottom: 1px solid #333; padding-bottom: 0.8rem; margin-top: 0.5rem; }
-#inspector-img { width: clamp(45px, 6vh, 55px); height: clamp(45px, 6vh, 55px); background: #333; border-radius: 6px; border: 2px solid #555; }
+#inspector-header { display: flex; align-items: center; gap: 0.8rem; border-bottom: 1px solid #333; padding-bottom: 0.8rem; margin-top: 0.5rem; flex-shrink: 0; }
+#inspector-img { width: clamp(45px, 6vh, 55px); height: clamp(45px, 6vh, 55px); background: #333; border-radius: 6px; border: 2px solid #555; flex-shrink: 0; }
 .inspector-title { display: flex; flex-direction: column; justify-content: center; }
 #inspector-name { font-weight: bold; color: var(--gold); font-size: 1.1rem; line-height: 1.1; margin-bottom: 2px; }
 #inspector-trait { font-size: 0.75rem; color: #aaa; font-style: italic; }
 #inspector-stars { font-size: 0.7rem; color: #ffd700; margin-top: 2px; }
 
-#inspector-items { display: flex; gap: 5px; justify-content: flex-start; background: rgba(0,0,0,0.3); padding: 5px; border-radius: 4px; }
+#inspector-items { display: flex; gap: 5px; justify-content: flex-start; background: rgba(0,0,0,0.3); padding: 5px; border-radius: 4px; flex-shrink: 0; }
 .insp-item-slot { width: 2rem; height: 2rem; background: #222; border: 1px solid #444; border-radius: 4px; display: flex; justify-content: center; align-items: center; font-size: 1rem; }
 
-.inspector-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 0.75rem; color: #ddd; }
+.inspector-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 0.75rem; color: #ddd; flex-shrink: 0; }
 .stat-row { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 4px 8px; border-radius: 3px; }
 .stat-val { font-weight: bold; color: white; }
 
-.inspector-skill-box { background: linear-gradient(135deg, rgba(50,50,60,0.4), rgba(20,20,30,0.6)); border: 1px solid #445; border-left: 2px solid var(--mana); padding: 0.8rem; border-radius: 4px; flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.skill-name { color: var(--mana); font-weight: bold; font-size: 0.9rem; margin-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; }
-#insp-skill-desc { color: #ccc; line-height: 1.3; font-size: 0.8rem; overflow-y: auto; flex: 1; padding-right: 5px; }
+.inspector-skill-box { 
+    background: linear-gradient(135deg, rgba(50,50,60,0.4), rgba(20,20,30,0.6)); 
+    border: 1px solid #445; border-left: 2px solid var(--mana); 
+    padding: 0.8rem; border-radius: 4px; 
+    display: flex; flex-direction: column; 
+    flex: 1; 
+    min-height: 0;
+}
+.skill-name { color: var(--mana); font-weight: bold; font-size: 0.9rem; margin-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; flex-shrink: 0; }
+#insp-skill-desc { 
+    color: #ccc; line-height: 1.3; font-size: 0.8rem; 
+    overflow-y: auto; 
+    flex: 1; 
+    padding-right: 5px; 
+}
 #insp-skill-desc::-webkit-scrollbar { width: 4px; } #insp-skill-desc::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
 
 /* UI KHÁC */
 #drag-ghost { position: fixed; pointer-events: none; z-index: 9999; opacity: 0.8; }
-#enemy-panel { position: absolute; top: 10px; right: 10px; z-index: 50; }
+
+#enemy-panel { 
+    position: absolute; 
+    bottom: 4.5rem;  
+    left: 10px; 
+    z-index: 50; 
+}
+
 #player-stats { position: absolute; bottom: 10px; left: 10px; display: flex; gap: 5px; align-items: flex-end; pointer-events: auto; z-index: 50; }
 #unit-inspector:not(.hidden) ~ #player-stats { display: none; }
+#unit-inspector:not(.hidden) ~ #enemy-panel { display: none; }
 
 .hp-box { background: rgba(0,0,0,0.7); padding: 5px; border-radius: 6px; text-align: center; border: 1px solid #444; min-width: 3rem; }
 .hp-box small { font-size: 0.5rem; color: #aaa; display: block; }
@@ -117,23 +162,95 @@ html { font-size: clamp(10px, 2.5vh, 16px); }
 .level-box { display: flex; justify-content: space-between; align-items: center; font-size: 0.7rem; }
 .mini-btn { background: #333; border: 1px solid #555; color: #ddd; font-size: 0.65rem; cursor: pointer; width: 100%; padding: 4px; margin-top: 2px; border-radius: 3px; }
 .xp-track { height: 4px; background: #222; width: 100%; border-radius: 2px; } #xp-fill { height: 100%; background: var(--blue); width: 0%; border-radius: 2px; }
-#round-display { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.6); padding: 4px 15px; border-radius: 12px; font-weight: bold; border: 1px solid #555; font-size: 1rem; z-index: 50; }
+
+/* --- CẬP NHẬT: ROUND & TIMER --- */
+#round-info-container {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    z-index: 200; pointer-events: none;
+}
+
+#round-display { 
+    /* Đã chuyển vào container */
+    background: linear-gradient(180deg, #2c3e50, #000); 
+    padding: 5px 25px; 
+    border-radius: 4px; 
+    font-weight: bold; 
+    border: 2px solid var(--gold); 
+    font-size: 1.2rem; 
+    color: var(--gold);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    text-shadow: 0 0 5px var(--gold);
+}
+
+#timer-bar-bg {
+    width: 200px; height: 12px;
+    background: rgba(0,0,0,0.8);
+    border: 1px solid #555;
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    display: flex; justify-content: center; align-items: center;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+}
+
+#timer-bar-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 100%;
+    background: linear-gradient(90deg, #3498db, #2ecc71);
+    transition: width 0.1s linear;
+}
+
+#timer-bar-fill.urgent { background: linear-gradient(90deg, #e74c3c, #c0392b); }
+
+#timer-text {
+    position: relative; z-index: 2;
+    font-size: 0.75rem; font-weight: bold; color: white;
+    text-shadow: 0 0 2px black; line-height: 1;
+}
+
 #controls-panel { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); display: flex; flex-direction: column; gap: 10px; pointer-events: auto; z-index: 100; }
 .action-btn { width: 3.5rem; height: 3.5rem; border-radius: 50%; border: none; font-size: 1.2rem; cursor: pointer; box-shadow: 0 4px 10px black; display: flex; justify-content: center; align-items: center; transition: transform 0.1s; }
 .action-btn:active { transform: scale(0.95); }
 .action-btn.battle { background: linear-gradient(135deg, #ff5e57, #d63031); color: white; }
 .action-btn.shop { background: #333; color: white; border: 1px solid #555; font-size: 1.2rem; }
 .action-btn.zoom { background: #444; color: var(--blue); border: 1px solid #555; font-size: 1.2rem; }
-#shop-wrapper { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: auto; align-items: stretch; transition: transform 0.2s; background: rgba(0,0,0,0.8); padding: 5px; border-radius: 8px; border: 1px solid #444; z-index: 100; }
-#shop-wrapper.hidden { transform: translate(-50%, 150%); display: flex !important; }
+.action-btn.settings { background: #555; color: #ccc; border: 1px solid #777; font-size: 1.5rem; }
+
+/* --- SHOP WRAPPER --- */
+#shop-wrapper { 
+    position: absolute; 
+    top: 55px; /* Hạ thấp xuống để nhường chỗ cho Round */
+    left: 50%; 
+    transform: translateX(-50%); 
+    display: flex; 
+    gap: 5px; 
+    pointer-events: auto; 
+    align-items: stretch; 
+    transition: transform 0.2s; 
+    background: rgba(0,0,0,0.8); 
+    padding: 5px; 
+    border-radius: 8px; 
+    border: 1px solid #444; 
+    z-index: 100; 
+}
+#shop-wrapper.hidden { 
+    transform: translate(-50%, -200%); 
+    display: flex !important; 
+}
+
 #shop-cards { display: flex; gap: 4px; }
-.refresh-btn { width: 2.5rem; background: #222; border: 1px solid #444; color: var(--gold); font-weight: bold; cursor: pointer; font-size: 1.2rem; border-radius: 4px; }
+.refresh-btn { width: 2.5rem; background: #222; border: 1px solid #444; color: var(--gold); font-weight: bold; cursor: pointer; font-size: 1.2rem; border-radius: 4px; display: flex; justify-content: center; align-items: center;}
+
+#btn-lock.active { border-color: #e74c3c; color: #e74c3c; background: rgba(231, 76, 60, 0.2); }
+
 .card { width: 3.5rem; height: 4.5rem; background: #151515; border-top: 3px solid #555; border-radius: 3px; cursor: pointer; position: relative; display: flex; flex-direction: column; }
 .card.c1 { border-color: #999; } .card.c2 { border-color: var(--green); } .card.c3 { border-color: var(--blue); } .card.c4 { border-color: #a0f; } .card.c5 { border-color: var(--gold); }
 .card.empty { opacity: 0; pointer-events: none; }
 .card-img { flex: 1; opacity: 0.8; }
 .card-name { font-size: 0.5rem; text-align: center; background: rgba(0,0,0,0.8); padding: 2px 0; font-weight: bold; white-space: nowrap; overflow: hidden; }
 .card-cost { font-size: 0.6rem; color: var(--gold); text-align: center; padding-bottom: 2px; }
+
 #sell-slot { position: absolute; bottom: 6rem; right: 4rem; width: 3.5rem; height: 3.5rem; background: rgba(80, 0, 0, 0.4); border: 2px dashed #e74c3c; border-radius: 8px; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #ffcccc; font-weight: bold; font-size: 0.7rem; pointer-events: auto; box-shadow: 0 0 10px rgba(0,0,0,0.3); z-index: 90; }
 #sell-slot.hover { background: #e74c3c; color: white; transform: scale(1.1); border-style: solid; box-shadow: 0 0 20px red; }
 #sell-slot span { font-size: 1.2rem; display: block; margin-bottom: 1px; }
@@ -155,7 +272,116 @@ html { font-size: clamp(10px, 2.5vh, 16px); }
 .bar-wrap.star-2 { border: 1px solid #c0c0c0; width: 34px; z-index: 50; }
 .bar-wrap.star-3 { border: 1px solid #ffd700; width: 38px; z-index: 60; }
 
+#settings-modal { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--bg); border: 2px solid var(--gold); border-radius: 8px; padding: 20px; width: 250px; z-index: 2000; box-shadow: 0 0 20px rgba(0,0,0,0.8); text-align: center; pointer-events: auto; }
+.settings-header { color: var(--gold); font-size: 1.2rem; font-weight: bold; margin-bottom: 15px; text-transform: uppercase; border-bottom: 1px solid #444; padding-bottom: 5px; }
+.settings-row { margin-bottom: 15px; }
+.settings-label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 5px; color: #ccc; }
+input[type=range] { width: 100%; -webkit-appearance: none; background: #333; height: 6px; border-radius: 3px; outline: none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: var(--gold); border-radius: 50%; cursor: pointer; }
+#btn-close-settings { margin-top: 10px; background: #333; border: 1px solid #555; color: white; padding: 5px 15px; cursor: pointer; border-radius: 4px; }
+
+/* --- LOBBY STYLES (SẢNH CHỜ) --- */
+#lobby-screen {
+    position: fixed; inset: 0; z-index: 200;
+    /* Ảnh nền placeholder - Bạn có thể thay link khác */
+    background: url('https://i.postimg.cc/44KTTnVW/1765463265570.png') no-repeat center center/cover;
+    transition: opacity 0.5s;
+}
+#lobby-screen.hidden { display: none; }
+#lobby-screen.fade-out { opacity: 0; pointer-events: none; }
+
+/* User Profile (Góc trên trái) */
+#user-profile-box {
+    position: absolute; top: 30px; left: 30px;
+    display: flex; align-items: center; gap: 15px;
+    padding: 10px 20px 10px 10px;
+    background: rgba(10, 15, 20, 0.8);
+    border: 2px solid #c8aa6e; border-radius: 50px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.8);
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+#user-profile-box:hover { transform: scale(1.05); background: rgba(20, 30, 40, 0.9); }
+
+#avatar-frame {
+    width: 60px; height: 60px; border-radius: 50%;
+    border: 3px solid #c8aa6e; overflow: hidden;
+    position: relative;
+}
+#avatar-frame img { width: 100%; height: 100%; object-fit: cover; }
+
+.user-info { display: flex; flex-direction: column; }
+#lobby-username { color: #f1c40f; font-weight: bold; font-size: 1.2rem; text-shadow: 1px 1px 2px black; }
+.user-status { color: #2ecc71; font-size: 0.8rem; }
+.edit-icon { color: #888; font-size: 0.8rem; margin-left: 5px; }
+
+/* Play Button (Góc dưới phải) */
+#play-container { position: absolute; bottom: 40px; right: 40px; }
+#btn-lobby-play {
+    background: linear-gradient(180deg, #1e2328, #16181c);
+    color: #c8aa6e; border: 2px solid #c8aa6e;
+    padding: 15px 50px; font-size: 1.5rem; font-weight: bold;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 2px;
+    box-shadow: 0 0 10px #c8aa6e, inset 0 0 20px rgba(0,0,0,0.8);
+    transition: all 0.2s;
+    position: relative; overflow: hidden;
+}
+#btn-lobby-play:hover {
+    background: #1e2328; color: #fff;
+    box-shadow: 0 0 20px #f1c40f, inset 0 0 10px rgba(241, 196, 15, 0.2);
+    text-shadow: 0 0 5px #fff;
+}
+#btn-lobby-play:active { transform: scale(0.95); }
+
+/* Modals (Cửa sổ bật lên) */
+.modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+    display: flex; justify-content: center; align-items: center; z-index: 300;
+}
+.modal-content {
+    background: #101215; border: 2px solid #c8aa6e;
+    padding: 30px; text-align: center; border-radius: 4px;
+    box-shadow: 0 0 30px rgba(0,0,0,0.9);
+    position: relative; min-width: 300px;
+}
+.modal-content::before { /* Viền trang trí */
+    content: ''; position: absolute; inset: 4px; border: 1px solid #444; pointer-events: none;
+}
+.modal-content h2, .modal-content h3 { color: #c8aa6e; margin-bottom: 20px; text-transform: uppercase; }
+.modal-content input {
+    background: #000; border: 1px solid #555; color: #fff;
+    padding: 10px; width: 80%; margin-bottom: 20px; text-align: center;
+    font-size: 1.1rem; outline: none;
+}
+.modal-content input:focus { border-color: #c8aa6e; }
+
+/* Mode Selection */
+.mode-options { display: flex; gap: 20px; justify-content: center; }
+.mode-card {
+    background: rgba(30, 35, 40, 0.8); border: 1px solid #555;
+    padding: 20px; width: 140px; cursor: pointer; color: #ccc;
+    transition: all 0.2s; display: flex; flex-direction: column; align-items: center;
+}
+.mode-card:hover:not(.disabled) { border-color: #c8aa6e; background: rgba(50, 60, 70, 0.9); color: white; transform: translateY(-5px); }
+.mode-icon { font-size: 2.5rem; margin-bottom: 10px; }
+.mode-card.disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
+.mode-card h3 { font-size: 1rem; margin: 5px 0; color: #fff; }
+.mode-card p { font-size: 0.7rem; color: #888; }
+
 @media screen and (orientation: portrait) {
     #game-ui, #ui-overlay { display: none !important; }
     body::after { content: "XOAY NGANG ĐIỆN THOẠI ĐỂ CHƠI 📱"; position: fixed; inset: 0; background: #000; color: #f1c40f; display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 1.2rem; z-index: 99999; }
+}
+
+/* --- FIX LỖI MÀN HÌNH ĐEN: CANVAS 3D --- */
+canvas {
+    position: fixed !important; /* Buộc canvas cố định */
+    top: 0;
+    left: 0;
+    z-index: 1; /* Nằm ngay trên nền body (0) nhưng dưới UI */
+    width: 100vw !important;
+    height: 100vh !important;
+    display: block;
+    outline: none;
+    pointer-events: auto; /* Cho phép xoay camera */
 }

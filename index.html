@@ -3,30 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TFT 3D - Mobile Optimized</title>
+    <title>TFT Remake - Sảnh Chờ</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="ui-overlay">
-        <div id="main-menu">
-            <h1 class="game-title">TFT Remake Beta</h1>
-            <p style="color:#aaa;font-size:0.8rem;margin-bottom:20px">v0.5 TFT Beta</p>
-            <button id="btn-start" class="btn-primary">VÀO GAME</button>
+
+    <div id="lobby-screen">
+        <div id="user-profile-box">
+            <div id="avatar-frame">
+                <img src="https://i.postimg.cc/Rh8S4HVp/1765463789414.png" alt="Avatar">
+            </div>
+            <div class="user-info">
+                <div id="lobby-username">Đang tải...</div>
+                <div class="user-status">Online</div>
+            </div>
+            <div class="edit-icon">✎</div>
+        </div>
+
+        <div id="play-container">
+            <button id="btn-lobby-play">ĐẤU NGAY</button>
+        </div>
+
+        <div id="mode-select-modal" class="modal-overlay hidden">
+            <div class="modal-content mode-box">
+                <h2>CHỌN CHẾ ĐỘ</h2>
+                <div class="mode-options">
+                    <button id="btn-mode-pve" class="mode-card">
+                        <div class="mode-icon">🤖</div>
+                        <h3>Đấu Với Máy</h3>
+                        <p>Luyện tập đội hình</p>
+                    </button>
+                    <button id="btn-mode-pvp" class="mode-card">
+                        <div class="mode-icon">⚔️</div>
+                        <h3>Ghép Trận</h3>
+                        <p>PvP 1vs1</p>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="name-input-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <h3>Tên hiển thị</h3>
+                <input type="text" id="input-player-name" placeholder="Nhập tên của bạn..." maxlength="12">
+                <button id="btn-confirm-name" class="btn-primary">Xác Nhận</button>
+            </div>
         </div>
     </div>
-
     <div id="game-ui" class="hidden">
-        
         <div id="sidebar-panel">
             <div class="sidebar-tabs">
                 <button id="tab-btn-syn" class="tab-btn active">🛡️ Tộc Hệ</button>
                 <button id="tab-btn-inv" class="tab-btn">🎒 Túi Đồ</button>
             </div>
-            
             <div id="content-syn" class="tab-content">
                 <div style="text-align:center; color:#666; font-size:0.8rem; padding:10px;">Chưa kích hoạt tộc hệ</div>
             </div>
-
             <div id="content-inv" class="tab-content hidden">
                 <div class="inv-grid">
                     <div class="inv-slot"></div><div class="inv-slot"></div><div class="inv-slot"></div>
@@ -36,10 +68,7 @@
         </div>
         
         <div id="item-tooltip" class="hidden">
-            <div id="tooltip-header">
-                <div id="tooltip-icon"></div>
-                <div id="tooltip-name">Tên Trang Bị</div>
-            </div>
+            <div id="tooltip-header"><div id="tooltip-icon"></div><div id="tooltip-name">Tên Trang Bị</div></div>
             <div id="tooltip-stats"></div>
         </div>
 
@@ -47,19 +76,9 @@
             <button id="btn-close-inspector">✕</button>
             <div id="inspector-header">
                 <div id="inspector-img"></div>
-                <div class="inspector-title">
-                    <div id="inspector-name">NAME</div>
-                    <div id="inspector-trait">TRAIT</div>
-                    <div id="inspector-stars">⭐⭐</div>
-                </div>
+                <div class="inspector-title"><div id="inspector-name">NAME</div><div id="inspector-trait">TRAIT</div><div id="inspector-stars">⭐⭐</div></div>
             </div>
-            
-            <div id="inspector-items">
-                <div class="insp-item-slot"></div>
-                <div class="insp-item-slot"></div>
-                <div class="insp-item-slot"></div>
-            </div>
-
+            <div id="inspector-items"><div class="insp-item-slot"></div><div class="insp-item-slot"></div><div class="insp-item-slot"></div></div>
             <div class="inspector-stats-grid">
                 <div class="stat-row"><span>❤️ Máu</span><span id="insp-hp" class="stat-val"></span></div>
                 <div class="stat-row"><span>💧 Mana</span><span id="insp-mana" class="stat-val"></span></div>
@@ -67,20 +86,24 @@
                 <div class="stat-row"><span>🏹 Tốc đánh</span><span id="insp-as" class="stat-val"></span></div>
                 <div class="stat-row"><span>🎯 Tầm xa</span><span id="insp-range" class="stat-val"></span></div>
             </div>
-
-            <div class="inspector-skill-box">
-                <div class="skill-name">⚡ <span id="insp-skill-name">Skill</span></div>
-                <div id="insp-skill-desc">Description...</div>
-            </div>
+            <div class="inspector-skill-box"><div class="skill-name">⚡ <span id="insp-skill-name">Skill</span></div><div id="insp-skill-desc">Description...</div></div>
         </div>
 
         <div id="enemy-panel"><div class="hp-box enemy"><small>ĐỊCH</small><span id="enemy-hp-text">100</span><div class="hp-bar"><div id="enemy-hp-fill" style="width:100%"></div></div></div></div>
-        <div id="round-display">1-1</div>
+        
+        <div id="round-info-container">
+            <div id="round-display">1-1</div>
+            <div id="timer-bar-bg" class="hidden">
+                <div id="timer-bar-fill"></div>
+                <div id="timer-text">30</div>
+            </div>
+        </div>
         
         <div id="controls-panel">
             <button id="btn-zoom" class="action-btn zoom">🔍</button>
             <button id="btn-battle" class="action-btn battle">⚔️</button>
             <button id="btn-shop-toggle" class="action-btn shop">🛒</button>
+            <button id="btn-settings" class="action-btn settings">⚙️</button>
         </div>
 
         <div id="player-stats">
@@ -93,17 +116,32 @@
             </div>
         </div>
 
-        <div id="shop-wrapper"><div id="shop-cards"></div><button id="btn-refresh" class="refresh-btn">↻</button></div>
+        <div id="shop-wrapper">
+            <button id="btn-lock" class="refresh-btn">🔓</button>
+            <div id="shop-cards"></div>
+            <button id="btn-refresh" class="refresh-btn">↻</button>
+        </div>
+        
         <div id="sell-slot" class="hidden"><span>🗑️</span><small>BÁN</small></div>
+
+        <div id="settings-modal" class="hidden">
+            <div class="settings-header">Cài Đặt</div>
+            <div class="settings-row">
+                <div class="settings-label"><span>Giao diện (UI)</span><span id="ui-scale-text">50%</span></div>
+                <input type="range" id="ui-scale-slider" min="50" max="100" value="50">
+            </div>
+            <button id="btn-close-settings">Đóng</button>
+        </div>
     </div>
 
     <div id="drag-ghost" class="item-icon hidden"></div>
-
     <div id="toast" class="hidden">Message</div>
     <div id="game-over" class="hidden"><h1 id="end-title">KẾT THÚC</h1><button id="btn-restart" class="btn-primary">CHƠI LẠI</button></div>
     <div id="world-ui"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script type="module" src="main.js"></script>
+    
+    <script type="module" src="lobby.js"></script>
+    <script type="module" src="logic.js"></script>
 </body>
 </html>
