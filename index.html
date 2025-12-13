@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TFT Remake - Sảnh Chờ</title>
+    <title>TFT Remake - Auto Battler</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -50,7 +50,17 @@
             </div>
         </div>
     </div>
+
     <div id="game-ui" class="hidden">
+        
+        <div id="augment-modal" class="hidden">
+            <div id="aug-modal-content">
+                <button id="btn-close-aug" class="hidden">✕</button>
+                <h2 id="aug-modal-title" class="aug-title">LỰA CHỌN LÕI CÔNG NGHỆ</h2>
+                <div id="augment-cards-container"></div>
+            </div>
+        </div>
+
         <div id="sidebar-panel">
             <div class="sidebar-tabs">
                 <button id="tab-btn-syn" class="tab-btn active">🛡️ Tộc Hệ</button>
@@ -93,7 +103,8 @@
         
         <div id="round-info-container">
             <div id="round-display">1-1</div>
-            <div id="timer-bar-bg" class="hidden">
+            <div id="phase-text" style="font-size: 0.8rem; color: #aaa; margin-top:2px;">CHUẨN BỊ</div>
+            <div id="timer-bar-bg">
                 <div id="timer-bar-fill"></div>
                 <div id="timer-text">30</div>
             </div>
@@ -101,7 +112,6 @@
         
         <div id="controls-panel">
             <button id="btn-zoom" class="action-btn zoom">🔍</button>
-            <button id="btn-battle" class="action-btn battle">⚔️</button>
             <button id="btn-shop-toggle" class="action-btn shop">🛒</button>
             <button id="btn-settings" class="action-btn settings">⚙️</button>
         </div>

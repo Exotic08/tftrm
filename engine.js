@@ -1,11 +1,12 @@
 // engine.js
-// GỘP: unit.js + viewManager.js
-// CẬP NHẬT: ĐỒ HỌA MÔI TRƯỜNG ĐẸP HƠN & SỬA LỖI RESET TƯỚNG & KHẮC PHỤC CRASH
+// QUẢN LÝ TƯỚNG (UNIT) & HIỂN THỊ (VIEW)
+// FIXED: Clean code, xử lý ánh sáng và camera an toàn để tránh màn hình đen
 
 import { 
-    CHAMPS, SYNERGIES, ITEMS, STATS, ARENA_RADIUS,
-    VisualEffect, Projectile, SKILLS 
+    CHAMPS, SYNERGIES, ITEMS, STATS, ARENA_RADIUS, SKILLS, RECIPES 
 } from './shared.js';
+
+import { VisualEffect, Projectile } from './3d.js';
 
 // ==========================================
 // CLASS UNIT: QUẢN LÝ TƯỚNG/QUÁI
@@ -27,47 +28,70 @@ export class Unit {
         // Tạo thanh máu HTML
         this.bar = document.createElement('div'); 
         this.bar.className = `bar-wrap ${team} star-1`;
-        this.bar.innerHTML = `<div class="item-badge-container"></div><div class="bar-hp"><div class="bar-fill"></div></div><div class="bar-mana"><div class="mana-fill"></div></div>`;
+        this.bar.innerHTML = `
+            <div class="item-badge-container"></div>
+            <div class="bar-hp"><div class="bar-fill"></div></div>
+            <div class="bar-mana"><div class="mana-fill"></div></div>
+        `;
         const worldUI = document.getElementById('world-ui');
         if(worldUI) worldUI.appendChild(this.bar);
         
-        this.meshBody = group.children.find(c=>c.name==='body');
-        if(this.meshBody) this.origColor = this.meshBody.material.color.clone();
+        // QUẢN LÝ VISUALS (Để làm hiệu ứng đỏ người khi trúng đòn, v.v.)
+        this.visuals = [];
+        this.group.children.forEach(c => {
+            if (c.name !== 'hitbox' && c.name !== 'bar') {
+                c.userData.basePos = c.position.clone();
+                c.userData.baseRot = c.rotation.clone();
+                if (c.material && c.material.color) {
+                    c.userData.origColor = c.material.color.clone();
+                }
+                this.visuals.push(c);
+            }
+        });
         
         this.isDead = false; 
         this.target = null; 
         this.lastAtk = 0;
+
+        // Animation State
+        this.animState = 'idle'; 
+        this.atkAnimTimer = 0;
+        this.moveAnimTimer = 0;
         
         this.updateStats(); 
         this.updateBar(); 
+        this.updateBarPos();
     }
 
-    // --- SỬA LỖI: HÀM RESET ĐẦY ĐỦ ---
     reset() {
         this.isDead = false;
-        this.hp = this.maxHp; // Hồi đầy máu
+        this.hp = this.maxHp; 
         
-        // Reset Mana
         let startMana = 0; 
         this.items.forEach(id => { if(ITEMS[id].stats.mana) startMana += ITEMS[id].stats.mana; });
         this.mana = Math.min(startMana, this.maxMana);
         
         this.shield = 0;
         this.stunTime = 0;
-        this.group.visible = true; // Hiện hình lại
+        this.group.visible = true; 
         this.target = null;
         
-        // Trả về màu gốc
-        if(this.meshBody) this.meshBody.material.color.copy(this.origColor);
+        // Reset Visuals
+        this.visuals.forEach(mesh => {
+            mesh.position.copy(mesh.userData.basePos);
+            mesh.rotation.copy(mesh.userData.baseRot);
+            if(mesh.material && mesh.userData.origColor) {
+                mesh.material.color.copy(mesh.userData.origColor);
+                mesh.material.emissive.setHex(0x000000);
+            }
+        });
         
-        // Đưa về vị trí cũ trên bàn cờ
         const hitBox = this.group.children.find(c=>c.name==='hitbox');
         if(hitBox && hitBox.userData.origPos) {
             this.group.position.copy(hitBox.userData.origPos);
             this.group.rotation.set(0,0,0);
         }
         
-        // Hiện lại thanh máu
         if(this.bar) {
             this.bar.style.display = 'flex';
             this.updateBar();
@@ -75,9 +99,31 @@ export class Unit {
         }
     }
 
+    // --- LOGIC ITEMS ---
     addItem(itemId) { 
+        const newItemData = ITEMS[itemId];
+        
+        if (newItemData.isComponent) {
+            const componentIdx = this.items.findIndex(id => ITEMS[id].isComponent);
+            if (componentIdx > -1) {
+                const existingId = this.items[componentIdx];
+                const key = [existingId, itemId].sort().join('_');
+                const resultId = RECIPES[key];
+                if (resultId) {
+                    this.items.splice(componentIdx, 1); 
+                    this.items.push(resultId);          
+                    this.updateStats(); 
+                    this.renderItemBadges(); 
+                    return resultId; 
+                }
+            }
+        }
+
         if(this.items.length >= 3) return false; 
-        this.items.push(itemId); this.updateStats(); this.renderItemBadges(); return true; 
+        this.items.push(itemId); 
+        this.updateStats(); 
+        this.renderItemBadges(); 
+        return true; 
     }
     
     renderItemBadges() { 
@@ -85,7 +131,15 @@ export class Unit {
         const container = this.bar.querySelector('.item-badge-container'); 
         if(container) {
             container.innerHTML = ''; 
-            this.items.forEach(id => { const item = ITEMS[id]; const div = document.createElement('div'); div.className = 'mini-item'; div.style.backgroundColor = item.color; container.appendChild(div); }); 
+            this.items.forEach(id => { 
+                const item = ITEMS[id]; 
+                if(item) {
+                    const div = document.createElement('div'); 
+                    div.className = 'mini-item'; 
+                    div.style.backgroundColor = item.color; 
+                    container.appendChild(div); 
+                }
+            }); 
         }
     }
 
@@ -97,7 +151,7 @@ export class Unit {
     }
 
     updateStats() {
-        const base = STATS[this.data.id]; 
+        const base = STATS[this.data.id] || { hp: 500, dmg: 40, as: 0.6, range: 1, armor: 20 }; // Fallback nếu thiếu data
         const multiplier = Math.pow(1.8, this.star - 1); 
         const oldMaxHp = this.maxHp || 0;
         
@@ -128,10 +182,20 @@ export class Unit {
         
         if(reducedAmt > 0) {
             this.hp -= reducedAmt; this.gainMana(5); 
-            if(this.meshBody && !this.isDead) { 
-                this.meshBody.material.color.setHex(0xffffff); 
-                setTimeout(()=>{ if(this.meshBody && !this.isDead && this.stunTime <= 0) this.meshBody.material.color.copy(this.origColor); }, 50); 
+            
+            if(!this.isDead) {
+                this.visuals.forEach(mesh => {
+                    if(mesh.material) mesh.material.emissive.setHex(0x555555);
+                });
+                setTimeout(()=>{ 
+                    if(!this.isDead && this.stunTime <= 0) {
+                        this.visuals.forEach(mesh => {
+                            if(mesh.material) mesh.material.emissive.setHex(0x000000);
+                        });
+                    }
+                }, 50);
             }
+
             if(this.hp <= 0) { 
                 this.hp = 0; this.isDead = true; this.group.visible = false; this.bar.style.display = 'none'; 
                 if (this.data.isMonster) this.gm.onMonsterDeath(this); 
@@ -143,10 +207,14 @@ export class Unit {
     update(t, units) {
         if(this.isDead) { this.bar.style.display='none'; return; }
         
+        this.updateAnimation(t); 
+
         if(this.stunTime > 0) { 
             this.stunTime -= 0.016; 
-            if(this.meshBody) this.meshBody.material.color.setHex(0x00a8ff); 
-            if(this.stunTime <= 0 && this.meshBody) this.meshBody.material.color.copy(this.origColor); 
+            this.visuals.forEach(mesh => { if(mesh.material) mesh.material.emissive.setHex(0x0000ff); }); 
+            if(this.stunTime <= 0) {
+                this.visuals.forEach(mesh => { if(mesh.material) mesh.material.emissive.setHex(0x000000); });
+            }
             this.updateBarPos(); return; 
         }
         this.updateBarPos();
@@ -164,32 +232,98 @@ export class Unit {
         if(this.target) {
             const d = this.group.position.distanceTo(this.target.group.position);
             if(d <= this.currStats.range + 0.8) {
+                this.animState = 'idle';
                 this.group.lookAt(this.target.group.position.x, this.group.position.y, this.target.group.position.z);
+                
                 if(t - this.lastAtk > (1/this.currStats.as)) { 
                     this.lastAtk = t; 
                     if(this.mana >= this.maxMana) this.castSkill(units); else this.attack(); 
                 }
-            } else { this.move(this.target.group.position, units); }
+            } else { 
+                this.move(this.target.group.position, units); 
+            }
+        } else {
+            this.animState = 'idle';
         }
     }
 
+    updateAnimation(t) {
+        if (this.visuals.length === 0) return;
+
+        let offsetPos = new THREE.Vector3(0, 0, 0);
+        let offsetRotX = 0;
+        let offsetRotZ = 0; 
+
+        if (this.atkAnimTimer > 0) {
+            this.atkAnimTimer -= 0.05; 
+            if (this.atkAnimTimer < 0) this.atkAnimTimer = 0;
+            const sineVal = Math.sin(this.atkAnimTimer * Math.PI);
+            if (this.currStats.type === 'range') {
+                offsetPos.z -= sineVal * 0.3; offsetRotX -= sineVal * 0.1;  
+            } else {
+                offsetPos.z += sineVal * 0.8; 
+            }
+        }
+
+        if (this.animState === 'move') {
+            this.moveAnimTimer += 0.3; 
+            offsetPos.y += Math.abs(Math.sin(this.moveAnimTimer)) * 0.2;
+            offsetRotZ = Math.sin(this.moveAnimTimer) * 0.1;
+            offsetRotX += 0.2; 
+        } else {
+            offsetPos.y += Math.sin(t * 2) * 0.02;
+        }
+
+        this.visuals.forEach(mesh => {
+            mesh.position.copy(mesh.userData.basePos);
+            mesh.rotation.copy(mesh.userData.baseRot);
+            mesh.position.add(offsetPos);
+            mesh.rotation.x += offsetRotX;
+            mesh.rotation.z += offsetRotZ;
+        });
+    }
+
+    // --- FIX HIỂN THỊ THANH MÁU ---
     updateBarPos() {
-        if (!this.gm.view || !this.gm.view.camera) return;
-        const pos = this.group.position.clone(); pos.y += 2.5 * this.group.scale.y; 
+        if (!this.gm.view || !this.gm.view.camera || !this.bar) return;
+        
+        const pos = this.group.position.clone();
+        // Tính độ cao dựa trên scale của group (để phù hợp với tướng to/nhỏ)
+        const heightOffset = 2.5 * (this.group.scale.y || 1);
+        pos.y += heightOffset; 
+        
         pos.project(this.gm.view.camera);
-        const x = (pos.x*.5 + .5)*window.innerWidth; const y = (-(pos.y*.5) + .5)*window.innerHeight;
-        this.bar.style.left = `${x}px`; this.bar.style.top = `${y}px`;
-        this.bar.style.display = (pos.z<1 && this.group.visible && !this.isDead) ? 'flex' : 'none';
+        
+        const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+        const y = (-(pos.y * 0.5) + 0.5) * window.innerHeight;
+        
+        // Cập nhật vị trí CSS
+        this.bar.style.left = `${x}px`; 
+        this.bar.style.top = `${y}px`;
+        
+        // Kiểm tra nằm trong khung hình camera
+        const isVisible = (pos.z < 1 && Math.abs(pos.x) < 1.2 && Math.abs(pos.y) < 1.2) && this.group.visible && !this.isDead;
+        this.bar.style.display = isVisible ? 'flex' : 'none';
+        
+        // Z-Index giả lập độ sâu (xa thì nằm dưới)
+        this.bar.style.zIndex = isVisible ? Math.floor((1 - pos.z) * 1000) : -1;
     }
 
     attack() {
+        this.atkAnimTimer = 1.0; 
         if (this.currStats.type === 'range') {
             const color = this.currStats.projColor || 0xffffff;
-            this.gm.view.spawnProjectile(this.group.position, this.target, color, this.currStats.dmg);
+            setTimeout(() => {
+                if(!this.isDead && this.target) 
+                    this.gm.view.spawnProjectile(this.group.position, this.target, color, this.currStats.dmg);
+            }, 100); 
         } else {
-            this.group.position.y = 0.5; setTimeout(()=>this.group.position.y=0, 100);
-            this.gm.view.spawnVFX(this.target.group.position, 'impact');
-            this.target.takeDmg(this.currStats.dmg);
+            setTimeout(() => {
+                if(!this.isDead && this.target) {
+                    this.gm.view.spawnVFX(this.target.group.position, 'impact');
+                    this.target.takeDmg(this.currStats.dmg);
+                }
+            }, 250); 
         }
         this.gainMana(10);
     }
@@ -198,6 +332,7 @@ export class Unit {
         this.mana = 0; this.updateBar(); 
         const skillId = this.currStats.skill || 'default'; 
         const skillFunc = SKILLS[skillId] || SKILLS['default']; 
+        this.atkAnimTimer = 1.5; 
         skillFunc(this, this.target, units); 
     }
 
@@ -205,10 +340,18 @@ export class Unit {
     
     findTarget(units) { 
         let minD = 999; this.target = null; 
-        units.forEach(u => { if(u.team !== this.team && !u.isDead) { const d = this.group.position.distanceTo(u.group.position); if(d < minD) { minD = d; this.target = u; } } }); 
+        units.forEach(u => { 
+            const hb = u.group.children.find(c=>c.name==='hitbox');
+            const isOnBench = hb && hb.userData.hex && hb.userData.hex.userData.isBench;
+            if(u.team !== this.team && !u.isDead && !isOnBench) { 
+                const d = this.group.position.distanceTo(u.group.position); 
+                if(d < minD) { minD = d; this.target = u; } 
+            } 
+        }); 
     }
     
     move(dest, units) {
+        this.animState = 'move'; 
         const dir = new THREE.Vector3().subVectors(dest, this.group.position).normalize(); const sep = new THREE.Vector3(); let count = 0;
         units.forEach(u => { if(u !== this && !u.isDead) { const d = this.group.position.distanceTo(u.group.position); if(d < 1.0) { const push = new THREE.Vector3().subVectors(this.group.position, u.group.position).normalize().divideScalar(d); sep.add(push); count++; } } });
         if(count>0) sep.divideScalar(count).multiplyScalar(0.8); dir.add(sep).normalize(); this.group.position.add(dir.multiplyScalar(0.06)); this.group.lookAt(dest.x, this.group.position.y, dest.z);
@@ -217,11 +360,19 @@ export class Unit {
 
     applyStun(duration) { this.stunTime = duration; }
     updateBar() { if(!this.bar) return; let hpPct = (this.hp / this.maxHp)*100; let manaPct = (this.mana / this.maxMana)*100; hpPct = Math.max(0, hpPct); manaPct = Math.max(0, manaPct); this.bar.querySelector('.bar-fill').style.width = `${hpPct}%`; this.bar.querySelector('.mana-fill').style.width = `${manaPct}%`; }
-    destroy() { if(this.bar) this.bar.remove(); if(this.gm.view.scene) this.gm.view.scene.remove(this.group); }
+    
+    destroy() { 
+        const hitBox = this.group.children.find(c=>c.name==='hitbox');
+        if(hitBox && hitBox.userData.hex) {
+            hitBox.userData.hex.userData.occupied = false;
+        }
+        if(this.bar) this.bar.remove(); 
+        if(this.gm.view.scene) this.gm.view.scene.remove(this.group); 
+    }
 }
 
 // ==========================================
-// CLASS VIEW MANAGER (ĐÃ CẬP NHẬT MÔI TRƯỜNG 3D)
+// CLASS VIEW MANAGER
 // ==========================================
 export class ViewManager {
     constructor(gm) {
@@ -240,15 +391,14 @@ export class ViewManager {
     }
 
     init() {
+        // Init Scene & Camera
         this.scene = new THREE.Scene();
-        
-        // --- CẬP NHẬT: BẦU TRỜI TRONG SÁNG ---
-        this.scene.background = new THREE.Color(0x87ceeb); // Sky Blue
-        this.scene.fog = new THREE.Fog(0x87ceeb, 20, 80); // Sương mù
+        this.scene.background = new THREE.Color(0x202025); // Màu nền xám đen
+        this.scene.fog = new THREE.Fog(0x202025, 20, 60);
 
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
         
-        // --- SỬA LỖI: KIỂM TRA SETTINGS AN TOÀN TRƯỚC KHI DÙNG ---
+        // Load Settings (UI Scale, Zoom)
         if (this.gm.settings) {
             if (this.gm.settings.uiScale) {
                 document.documentElement.style.setProperty('--ui-scale', this.gm.settings.uiScale);
@@ -270,30 +420,35 @@ export class ViewManager {
         this.camera.position.copy(this.targetPos); 
         this.camera.lookAt(this.targetLook);
         
+        // Init Renderer
         this.renderer = new THREE.WebGLRenderer({antialias:true}); 
         this.renderer.setSize(window.innerWidth, window.innerHeight); 
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Bóng mềm
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+        this.renderer.outputEncoding = THREE.sRGBEncoding; 
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); 
         
-        // --- CHÚ Ý: style.css đã set canvas position:fixed để tránh vỡ layout
         document.body.appendChild(this.renderer.domElement);
         
-        // --- CẬP NHẬT: ÁNH SÁNG RỰC RỠ ---
-        // 1. Ánh sáng môi trường
-        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+        // Lights (Quan trọng: Không có cái này là đen thui)
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.7);
         this.scene.add(hemiLight);
 
-        // 2. Ánh sáng mặt trời
-        const dir = new THREE.DirectionalLight(0xffffff, 1.2); 
-        dir.position.set(10, 20, 10); 
+        const dir = new THREE.DirectionalLight(0xffefd5, 1.3); 
+        dir.position.set(10, 20, 5); 
         dir.castShadow = true;
-        dir.shadow.mapSize.width = 2048;
-        dir.shadow.mapSize.height = 2048;
+        dir.shadow.mapSize.width = 1024;
+        dir.shadow.mapSize.height = 1024;
+        dir.shadow.bias = -0.0001;
         this.scene.add(dir);
         
-        // 3. Sàn đấu sáng sủa hơn
+        // Ground
         const grGeo = new THREE.PlaneGeometry(60,60); 
-        const grMat = new THREE.MeshStandardMaterial({color:0x556677, roughness: 0.8, metalness: 0.1}); 
+        const grMat = new THREE.MeshStandardMaterial({
+            color: 0x3a6b35, 
+            roughness: 0.9,
+            metalness: 0.1
+        }); 
         const ground = new THREE.Mesh(grGeo, grMat); 
         ground.rotation.x = -Math.PI/2; 
         ground.receiveShadow = true; 
@@ -311,38 +466,42 @@ export class ViewManager {
     }
 
     createGrid() {
-        const r=1, w=r*1.732, h=r*1.5; const hexGeo = new THREE.CylinderGeometry(r,r,0.2,6);
+        const r=1, w=r*1.732, h=r*1.5; const hexGeo = new THREE.CylinderGeometry(r,r,0.1,6);
         for(let row=0; row<8; row++) { for(let col=0; col<7; col++) {
             const x = (col - 3)*w + (row%2 ? w/2 : 0); const z = (row - 3.5)*h; 
             const isPlayer = row >= 4; const isBench = row === 7;
-            const mat = new THREE.MeshStandardMaterial({color: isBench ? 0x222 : (isPlayer ? 0x334466 : 0x553333), roughness: 0.5});
-            const hex = new THREE.Mesh(hexGeo, mat); hex.position.set(x, 0.1, z); hex.receiveShadow = true;
+            const mat = new THREE.MeshStandardMaterial({
+                color: isBench ? 0x1a1a1a : (isPlayer ? 0x223344 : 0x442222), 
+                roughness: 0.5,
+                metalness: 0.2,
+                transparent: true,
+                opacity: 0.7 
+            });
+            const hex = new THREE.Mesh(hexGeo, mat); hex.position.set(x, 0.05, z); hex.receiveShadow = true;
             hex.userData = { isHex:true, occupied:false, isPlayer, isBench, origCol: mat.color.getHex() };
+            
             const edges = new THREE.EdgesGeometry(hexGeo); 
-            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({color: isPlayer?0x66ccff:0xff6666, transparent:true, opacity:0.4}));
-            hex.add(line); this.scene.add(hex); this.gm.hexes.push(hex);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({color: isPlayer?0x66ccff:0xff4444, transparent:true, opacity:0.3}));
+            hex.add(line); 
+            
+            this.scene.add(hex); this.gm.hexes.push(hex);
         }}
-        const slotGeo = new THREE.BoxGeometry(1.2, 0.2, 1.2); const slotMat = new THREE.MeshStandardMaterial({color: 0x222});
-        const orbGeo = new THREE.SphereGeometry(0.4, 16, 16); const orbMat = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 0.6 }); 
+        const slotGeo = new THREE.BoxGeometry(1.2, 0.1, 1.2); const slotMat = new THREE.MeshStandardMaterial({color: 0x1a1a1a});
+        const orbGeo = new THREE.SphereGeometry(0.4, 16, 16); const orbMat = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffaa00, emissiveIntensity: 0.5 }); 
         for(let i=0; i<5; i++) {
-            const slot = new THREE.Mesh(slotGeo, slotMat); slot.position.set(9, 0.1, (i - 2) * 1.5); slot.receiveShadow = true; this.scene.add(slot);
+            const slot = new THREE.Mesh(slotGeo, slotMat); slot.position.set(9, 0.05, (i - 2) * 1.5); slot.receiveShadow = true; this.scene.add(slot);
             const orb = new THREE.Mesh(orbGeo, orbMat); orb.position.set(9, 1, (i - 2) * 1.5); orb.castShadow = true; orb.visible = false; orb.userData = { baseY: 1, offset: i }; this.scene.add(orb); this.gm.interestOrbs.push(orb);
         }
     }
 
     initUIListeners() {
-        document.body.style.touchAction = 'none';
         const get = (id) => document.getElementById(id);
         const bind = (id, event, handler) => { const el = get(id); if (el) el[event] = handler; };
 
-        bind('btn-start', 'onclick', () => { 
-            const ui = get('ui-overlay'); if(ui) ui.classList.add('hidden'); 
-            const gui = get('game-ui'); if(gui) gui.classList.remove('hidden'); 
-            const sell = get('sell-slot'); if(sell) sell.classList.remove('hidden'); 
-            this.gm.isGameStarted = true; this.gm.refreshShop(); this.updateUI(); 
-        });
-
-        bind('btn-battle', 'onclick', () => this.gm.startCombat());
+        // Xóa nút btn-start không tồn tại để code sạch hơn
+        // Nút Battle đã được xử lý hiển thị ở logic.js, ở đây chỉ cần bind event nếu nút tồn tại
+        bind('btn-lobby-play', 'onclick', () => { /* Xử lý ở Lobby.js */ });
+        
         bind('btn-refresh', 'onclick', () => { if(this.gm.gold>=2){this.gm.gold-=2; this.gm.refreshShop(); this.updateUI();} });
         bind('btn-buy-xp', 'onclick', () => { if(this.gm.gold>=4 && this.gm.lvl<9) { this.gm.gold-=4; this.gm.xp+=4; if(this.gm.xp>=this.gm.getXpNeed()){this.gm.xp-=this.gm.getXpNeed();this.gm.lvl++} this.updateUI();} });
         bind('btn-shop-toggle', 'onclick', () => { const shp = get('shop-wrapper'); if(shp) shp.classList.toggle('hidden'); });
@@ -412,22 +571,52 @@ export class ViewManager {
             }
         });
     }
+
     showTooltip(e, index) {
         const item = ITEMS[this.gm.inventory[index]]; if(!item) return;
+        this.renderTooltipData(e, item);
+    }
+
+    showCraftTooltip(e, itemId) {
+        const item = ITEMS[itemId]; if(!item) return;
+        this.renderTooltipData(e, item, "SẼ GHÉP THÀNH:");
+    }
+
+    renderTooltipData(e, item, titlePrefix = "") {
         const tip = document.getElementById('item-tooltip'); if(!tip) return;
         const icon = document.getElementById('tooltip-icon'); if(icon) { icon.innerText = item.icon; icon.style.borderColor = item.color; }
-        const name = document.getElementById('tooltip-name'); if(name) { name.innerText = item.name; name.style.color = item.color; }
-        let str = ""; if(item.stats.dmg) str += `+${item.stats.dmg} Sát thương\n`; if(item.stats.hp) str += `+${item.stats.hp} Máu\n`; if(item.stats.as) str += `+${(item.stats.as*100).toFixed(0)}% Tốc đánh\n`; if(item.stats.mana) str += `+${item.stats.mana} Mana khởi đầu\n`;
-        const stats = document.getElementById('tooltip-stats'); if(stats) stats.innerText = str;
-        tip.classList.remove('hidden'); let cx, cy; if(e.touches && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; } else { cx = e.clientX; cy = e.clientY; } tip.style.left = (cx + 20) + 'px'; tip.style.top = (cy - 50) + 'px';
+        const name = document.getElementById('tooltip-name'); if(name) { name.innerText = (titlePrefix ? titlePrefix + " " : "") + item.name; name.style.color = item.color; }
+        
+        let str = "";
+        if (item.desc) str += `<span style="color:#ddd;font-style:italic;">${item.desc}</span>\n\n`;
+        
+        if (item.stats) {
+            if(item.stats.dmg) str += `+${item.stats.dmg} Sát thương\n`; 
+            if(item.stats.hp) str += `+${item.stats.hp} Máu\n`; 
+            if(item.stats.as) str += `+${(item.stats.as*100).toFixed(0)}% Tốc đánh\n`; 
+            if(item.stats.mana) str += `+${item.stats.mana} Mana khởi đầu\n`;
+            if(item.stats.armor) str += `+${item.stats.armor} Giáp\n`;
+        }
+        
+        const stats = document.getElementById('tooltip-stats'); if(stats) stats.innerHTML = str;
+        
+        tip.classList.remove('hidden'); 
+        let cx, cy; 
+        if(e.touches && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; } 
+        else { cx = e.clientX; cy = e.clientY; } 
+        tip.style.left = (cx + 20) + 'px'; tip.style.top = (cy - 50) + 'px';
     }
+
     hideTooltip() { const tip = document.getElementById('item-tooltip'); if(tip) tip.classList.add('hidden'); }
     
-    // --- LẤY MÔ TẢ TỪ STATS ---
     showInspector(unit) {
         const ui = document.getElementById('unit-inspector'); if(!ui) return; ui.classList.remove('hidden');
         document.getElementById('inspector-name').innerText = unit.data.name;
-        document.getElementById('inspector-trait').innerText = SYNERGIES[unit.data.trait]?.name || '';
+        
+        const traitName = SYNERGIES[unit.data.trait]?.name || '';
+        const cost = unit.data.cost;
+        document.getElementById('inspector-trait').innerText = `${traitName} - ${cost} Vàng`;
+        
         document.getElementById('inspector-img').style.backgroundColor = '#'+unit.data.color.toString(16);
         document.getElementById('inspector-stars').innerText = '⭐'.repeat(unit.star);
         document.getElementById('insp-hp').innerText = `${Math.floor(unit.hp)}/${unit.maxHp}`;
@@ -436,18 +625,43 @@ export class ViewManager {
         document.getElementById('insp-as').innerText = unit.currStats.as.toFixed(2);
         document.getElementById('insp-range').innerText = unit.currStats.range;
         
-        const skill = STATS[unit.data.id].skillInfo || {name: 'Đánh thường', desc: 'Không có kỹ năng đặc biệt'};
+        const skill = STATS[unit.data.id]?.skillInfo || {name: 'Đánh thường', desc: 'Không có kỹ năng đặc biệt'};
         document.getElementById('insp-skill-name').innerText = skill.name;
         document.getElementById('insp-skill-desc').innerText = skill.desc;
         
         const slots = ui.querySelectorAll('.insp-item-slot');
-        slots.forEach((s, i) => { s.innerHTML = ''; if (i < unit.items.length) { const itemData = ITEMS[unit.items[i]]; if(itemData) { s.innerText = itemData.icon; s.style.color = itemData.color; s.style.borderColor = itemData.color; } } else { s.style.borderColor = '#444'; } });
+        slots.forEach((s, i) => { 
+            s.innerHTML = ''; 
+            s.onmouseenter = null; s.onmouseleave = null; s.onclick = null;
+
+            if (i < unit.items.length) { 
+                const itemData = ITEMS[unit.items[i]]; 
+                if(itemData) { 
+                    s.innerText = itemData.icon; 
+                    s.style.color = itemData.color; 
+                    s.style.borderColor = itemData.color; 
+                    s.style.cursor = 'pointer';
+                    s.onmouseenter = (e) => this.renderTooltipData(e, itemData);
+                    s.onmouseleave = () => this.hideTooltip();
+                    s.onclick = (e) => { e.stopPropagation(); this.renderTooltipData(e, itemData); };
+                } 
+            } else { 
+                s.style.borderColor = '#444'; 
+                s.style.cursor = 'default';
+            } 
+        });
     }
     
     closeInspector() { const ui = document.getElementById('unit-inspector'); if(ui) ui.classList.add('hidden'); }
     toast(msg) { const t = document.getElementById('toast'); if(t) { t.innerText = msg; t.classList.remove('hidden'); t.style.animation = 'none'; t.offsetHeight; t.style.animation = 'pop 1.5s forwards'; } }
     updateCamera() { this.camera.position.lerp(this.targetPos, 0.1); this.currLook.lerp(this.targetLook, 0.1); this.camera.lookAt(this.currLook); }
     toggleZoom() { this.zoomIdx = (this.zoomIdx + 1) % this.zoomLevels.length; this.targetPos = this.zoomLevels[this.zoomIdx].pos.clone(); this.targetLook = this.zoomLevels[this.zoomIdx].look.clone(); this.toast("Zoom: " + ["XA", "VỪA", "GẦN"][this.zoomIdx]); }
-    spawnVFX(pos, type) { this.gm.vfxList.push(new VisualEffect(this.scene, pos, type)); }
-    spawnProjectile(start, target, color, dmg, isStun=false) { this.gm.projList.push(new Projectile(this.scene, start, target, color, dmg, isStun)); }
+    
+    spawnVFX(pos, type) { 
+        this.gm.vfxList.push(new VisualEffect(this.scene, pos, type)); 
+    }
+    
+    spawnProjectile(start, target, color, dmg, isStun=false) { 
+        this.gm.projList.push(new Projectile(this.scene, start, target, color, dmg, isStun)); 
+    }
 }
