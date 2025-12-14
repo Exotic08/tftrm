@@ -473,7 +473,17 @@ export const UnitFactory = {
             group.add(wGroup);
         }
 
-        const hit = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshBasicMaterial({ visible: true, transparent: true, opacity: 0, depthWrite: false })); 
+        const hit = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 2, 1), 
+            new THREE.MeshBasicMaterial({ 
+                color: 0x000000, 
+                visible: true, 
+                transparent: true, 
+                opacity: 0, 
+                depthWrite: false, 
+                side: THREE.DoubleSide 
+            })
+        );
         hit.userData = { isUnit:true, data: data, hex: hex, team: team }; hit.name = 'hitbox'; group.add(hit);
         
         const s = (data.scale || 1.3) * 1.1; 
