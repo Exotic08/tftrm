@@ -22,6 +22,7 @@ function createIconTexture(text, color) {
     return new THREE.CanvasTexture(canvas);
 }
 
+// MONKEY PATCH UNIT
 const originalUpdateStats = Unit.prototype.updateStats;
 Unit.prototype.updateStats = function() {
     originalUpdateStats.call(this); 
@@ -81,7 +82,7 @@ export class GameManager {
         try { 
             this.view.init(); 
             this.createAugmentPillar3D(); 
-            this.initInput();
+            this.initInput(); // KHỞI TẠO INPUT
             this.view.renderInventory(); 
             
             if(this.mode === 'pvp') {
@@ -163,6 +164,10 @@ export class GameManager {
             }
         }
     }
+
+    // ... (Giữ nguyên các hàm autoDeploy, createUnit, buyUnit, sellUnit, checkTriple, handleItemStart, startCombat, spawnPveEnemies, spawnPvpOpponent, spawnBotFallback, endCombat, updateUIPhase, createAugmentPillar3D, updateAugmentPillar3D, checkAugmentRound, triggerAugmentSelection, showAugmentInfo, createAugmentCard, selectAugment, onMonsterDeath, serializeBoard, spawnEnemyFromData, listenMatchState) ...
+    // ĐỂ CODE GỌN, TÔI ĐÃ GIỮ CÁC HÀM LOGIC GAME CŨ KHÔNG ĐỔI Ở ĐÂY.
+    // DƯỚI ĐÂY LÀ PHẦN SỬA LỖI INPUT QUAN TRỌNG:
 
     autoDeploy() {
         const limitBonus = this.augments.find(a => a.id === 'new_recruit') ? 1 : 0;
@@ -562,15 +567,21 @@ export class GameManager {
         });
     }
 
+    // --- FIX QUAN TRỌNG: CẢM ỨNG & RAYCASTER ---
+    
     initInput() {
         const handler = (e) => this.handleInput(e);
+        // Passive: false để có thể gọi preventDefault() chặn scroll
         const opts = { passive: false }; 
 
-        window.addEventListener('mousedown', handler);
+        // Gắn vào DOMElement của ThreeJS (Canvas) thay vì window để chính xác hơn
+        const canvas = this.view.renderer.domElement;
+
+        canvas.addEventListener('mousedown', handler);
         window.addEventListener('mousemove', handler);
         window.addEventListener('mouseup', handler);
         
-        window.addEventListener('touchstart', handler, opts);
+        canvas.addEventListener('touchstart', handler, opts);
         window.addEventListener('touchmove', handler, opts);
         window.addEventListener('touchend', handler, opts);
 
@@ -582,6 +593,8 @@ export class GameManager {
         if (!this.isGameStarted) return;
         
         const isTouch = e.type.startsWith('touch');
+        
+        // Chặn scroll khi đang kéo thả
         if (this.dragged || this.dragItem !== null || (isTouch && this.isDragging)) {
             if (e.cancelable) e.preventDefault(); 
         }
@@ -599,12 +612,28 @@ export class GameManager {
 
         if (cx === undefined || isNaN(cx)) return;
         
-        const type = e.type;
-        const fakeEvent = { clientX: cx, clientY: cy, target: e.target, type: type };
+        const fakeEvent = { clientX: cx, clientY: cy, target: e.target };
 
-        if(type === 'mousedown' || type === 'touchstart') this.onDown(fakeEvent);
-        else if(type === 'mousemove' || type === 'touchmove') this.onMove(fakeEvent);
-        else if(type === 'mouseup' || type === 'touchend') this.onUp(fakeEvent);
+        if(e.type === 'mousedown' || e.type === 'touchstart') this.onDown(fakeEvent);
+        else if(e.type === 'mousemove' || e.type === 'touchmove') this.onMove(fakeEvent);
+        else if(e.type === 'mouseup' || e.type === 'touchend') this.onUp(fakeEvent);
+    }
+
+    updateRay(cx, cy) { 
+        // FIX: Tính toán dựa trên kích thước thật của Canvas
+        // Thay vì dùng window.innerWidth (có thể bị sai do thanh địa chỉ/scroll)
+        if (!this.view.renderer || !this.view.renderer.domElement) return;
+        
+        const canvas = this.view.renderer.domElement;
+        const rect = canvas.getBoundingClientRect();
+        
+        const x = cx - rect.left;
+        const y = cy - rect.top;
+        
+        this.mouse.x = (x / rect.width) * 2 - 1;
+        this.mouse.y = -(y / rect.height) * 2 + 1;
+        
+        this.ray.setFromCamera(this.mouse, this.view.camera); 
     }
 
     listenMatchState() { 
@@ -767,7 +796,6 @@ export class GameManager {
     getXpNeed() { return XP_TO_LEVEL[this.lvl] || 9999; }
     
     updateGhostPos(e) { let cx, cy; if(e.touches && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; } else if (e.changedTouches && e.changedTouches.length > 0) { cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY; } else { cx = e.clientX; cy = e.clientY; } const ghost = document.getElementById('drag-ghost'); ghost.style.left = (cx - 20) + 'px'; ghost.style.top = (cy - 20) + 'px'; }
-    updateRay(cx, cy) { this.mouse.x = (cx/window.innerWidth)*2-1; this.mouse.y = -(cy/window.innerHeight)*2+1; this.ray.setFromCamera(this.mouse, this.view.camera); }
 }
 
 window.initTFTGame = (userSettings) => {
