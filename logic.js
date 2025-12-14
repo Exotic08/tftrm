@@ -1,19 +1,12 @@
-// logic.js
-// CẬP NHẬT: FIX LỖI PVP SYNC (ĐỒNG BỘ DỮ LIỆU) & TIMEOUT
-
-import { 
-    CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS 
-} from './shared.js';
+import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS } from './shared.js';
 import { Unit, ViewManager } from './engine.js';
 import { UnitFactory } from './3d.js'; 
 import { ref, update, onValue, set, off } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
 
-// --- HELPER: VẼ ICON LÊN TEXTURE 3D ---
 function createIconTexture(text, color) {
     const canvas = document.createElement('canvas');
     canvas.width = 128; canvas.height = 128;
     const ctx = canvas.getContext('2d');
-    
     ctx.beginPath();
     ctx.arc(64, 64, 58, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(20, 30, 40, 0.9)'; 
@@ -21,17 +14,14 @@ function createIconTexture(text, color) {
     ctx.lineWidth = 8;
     ctx.strokeStyle = color; 
     ctx.stroke();
-
     ctx.font = '80px Arial';
     ctx.fillStyle = color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, 64, 70); 
-
     return new THREE.CanvasTexture(canvas);
 }
 
-// MONKEY PATCH: BUFF THẺ BÀI
 const originalUpdateStats = Unit.prototype.updateStats;
 Unit.prototype.updateStats = function() {
     originalUpdateStats.call(this); 
@@ -55,13 +45,9 @@ Unit.prototype.updateStats = function() {
     this.updateBar();
 };
 
-// ==========================================
-// GAME MANAGER
-// ==========================================
 export class GameManager {
     constructor(settings) {
         this.settings = settings || {};
-        
         this.mode = this.settings.mode || 'pve'; 
         this.db = this.settings.db;
         this.matchId = this.settings.matchId;
@@ -72,11 +58,8 @@ export class GameManager {
         this.vfxList = []; this.projList = [];
         this.isGameStarted = false;
         
-        // Game State
         this.gold = 4; this.lvl = 1; this.xp = 0; this.php = 100; this.ehp = 100; 
         this.stage = 1; this.subRound = 1; this.phase = 'prep';
-        
-        // --- NEW: TIMER SYSTEM ---
         this.timer = TIMERS.PREP; 
         this.lastTime = 0; 
         
@@ -111,13 +94,10 @@ export class GameManager {
         } catch(e) { console.error("Game Init Error:", e); alert("Lỗi: " + e.message); }
     }
 
-    // --- GAME LOOP & TIMER ---
-
     loop() {
         requestAnimationFrame(() => this.loop());
-        
         const now = performance.now();
-        const dt = (now - this.lastTime) / 1000; // Delta time in seconds
+        const dt = (now - this.lastTime) / 1000; 
         this.lastTime = now;
 
         if (this.isGameStarted) {
@@ -125,24 +105,18 @@ export class GameManager {
         }
 
         this.view.updateCamera();
-        
-        // Update Logic
         this.units.forEach(u => u.update(now * 0.001, this.units)); 
         
-        // Check end combat condition
         if(this.phase === 'combat') {
             const playerLive = this.units.filter(u => u.team === 'player' && !u.isDead && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench).length;
             const enemyLive = this.units.filter(u => u.team === 'enemy' && !u.isDead).length;
-            
             if (playerLive === 0) this.endCombat(false); 
             else if (enemyLive === 0) this.endCombat(true); 
         }
 
-        // VFX Updates
         for(let i=this.vfxList.length-1; i>=0; i--) { if(!this.vfxList[i].update()) { this.vfxList.splice(i, 1); } }
         for(let i=this.projList.length-1; i>=0; i--) { if(!this.projList[i].update()) { this.projList.splice(i, 1); } }
         
-        // Update Interest Orbs Animation
         const maxInterest = this.augments.find(a => a.id === 'rich_get_richer') ? 7 : 5;
         const interest = Math.min(Math.floor(this.gold / 10), maxInterest);
         this.interestOrbs.forEach((orb, i) => { 
@@ -150,7 +124,6 @@ export class GameManager {
             if(orb.visible) { orb.position.y = orb.userData.baseY + Math.sin(now * 0.003 + orb.userData.offset)*0.2; } 
         });
 
-        // 3D Pillar Animation
         if (this.pillarIcons) {
             this.pillarIcons.forEach((icon, i) => {
                 if(icon.visible) {
@@ -164,11 +137,8 @@ export class GameManager {
     }
 
     updateTimer(dt) {
-        if (this.php <= 0 || this.ehp <= 0) return; // Game over
-
+        if (this.php <= 0 || this.ehp <= 0) return; 
         this.timer -= dt;
-
-        // Cập nhật UI Timer
         const timerFill = document.getElementById('timer-bar-fill');
         const timerText = document.getElementById('timer-text');
         const phaseText = document.getElementById('phase-text');
@@ -176,16 +146,13 @@ export class GameManager {
         if (timerFill && timerText && phaseText) {
             const maxTime = this.phase === 'prep' ? TIMERS.PREP : TIMERS.COMBAT;
             const pct = Math.max(0, (this.timer / maxTime) * 100);
-            
             timerFill.style.width = `${pct}%`;
             timerText.innerText = Math.ceil(this.timer);
             phaseText.innerText = this.phase === 'prep' ? "CHUẨN BỊ" : "CHIẾN ĐẤU";
-            
             if (this.timer < 5) timerFill.classList.add('urgent');
             else timerFill.classList.remove('urgent');
         }
 
-        // Hết giờ -> Chuyển Phase
         if (this.timer <= 0) {
             if (this.phase === 'prep') {
                 this.autoDeploy(); 
@@ -202,31 +169,23 @@ export class GameManager {
         const limit = this.lvl + limitBonus;
         const activeUnits = this.units.filter(u => u.team === 'player' && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench);
         let currentCount = activeUnits.length;
-
         if (currentCount >= limit) return;
-
         const benchUnits = this.units.filter(u => u.team === 'player' && u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench);
         if (benchUnits.length === 0) return;
-
         const emptyBoardHexes = this.hexes.filter(h => h.userData.isPlayer && !h.userData.isBench && !h.userData.occupied);
-
         benchUnits.forEach(u => {
             if (currentCount < limit && emptyBoardHexes.length > 0) {
                 const targetHex = emptyBoardHexes.shift(); 
                 const oldHex = u.group.children.find(c=>c.name==='hitbox').userData.hex;
-
                 oldHex.userData.occupied = false;
                 targetHex.userData.occupied = true;
                 u.group.children.find(c=>c.name==='hitbox').userData.hex = targetHex;
-
                 u.group.position.copy(targetHex.position);
                 u.group.children.find(c=>c.name==='hitbox').userData.origPos = targetHex.position.clone();
-
                 this.view.spawnVFX(targetHex.position, 'upgrade');
                 currentCount++;
             }
         });
-
         if (currentCount > activeUnits.length) {
             this.view.toast("Tự động ra trận!");
             this.calcSyn();
@@ -244,13 +203,10 @@ export class GameManager {
 
     buyUnit(data) {
         if(this.gold < data.cost) { this.view.toast("Không đủ vàng!"); return false; }
-        
         const benchHex = this.hexes.find(h => h.userData.isPlayer && h.userData.isBench && !h.userData.occupied);
         if(!benchHex) { this.view.toast("Hàng chờ đầy!"); return false; }
-
         this.gold -= data.cost;
         const newUnit = this.createUnit(data, benchHex, 'player');
-        
         this.checkTriple(newUnit);
         this.calcSyn();
         this.view.updateUI();
@@ -262,7 +218,6 @@ export class GameManager {
         if(unit) {
             const refund = unit.data.cost * Math.pow(3, unit.star - 1);
             this.gold += refund;
-            
             if(unit.items.length > 0) {
                 unit.items.forEach(item => {
                     if(this.inventory.length < 10) this.inventory.push(item);
@@ -270,7 +225,6 @@ export class GameManager {
                 this.view.renderInventory();
                 this.view.toast("Đã thu hồi trang bị");
             }
-
             unit.destroy();
             this.units = this.units.filter(u => u !== unit);
             this.view.toast(`Bán +${refund}g`);
@@ -281,38 +235,22 @@ export class GameManager {
 
     checkTriple(unit) {
         if(unit.star >= 3) return;
-        
-        const sameUnits = this.units.filter(u => 
-            u.team === 'player' && 
-            u.data.id === unit.data.id && 
-            u.star === unit.star && 
-            !u.isDead
-        );
-
+        const sameUnits = this.units.filter(u => u.team === 'player' && u.data.id === unit.data.id && u.star === unit.star && !u.isDead);
         if(sameUnits.length >= 3) {
             const u1 = sameUnits[0];
             const u2 = sameUnits[1];
             const u3 = sameUnits[2];
-            
             const targetHex = u3.group.children.find(c=>c.name==='hitbox').userData.hex;
             const collectedItems = [...u1.items, ...u2.items, ...u3.items].slice(0, 3); 
-            
-            u1.destroy();
-            u2.destroy();
-            u3.destroy();
-            
+            u1.destroy(); u2.destroy(); u3.destroy();
             this.units = this.units.filter(u => u !== u1 && u !== u2 && u !== u3);
-
             const newUnit = this.createUnit(unit.data, targetHex, 'player');
             newUnit.star = unit.star; 
             newUnit.upgradeStar();
-            
             collectedItems.forEach(item => newUnit.addItem(item));
             newUnit.updateStats();
-
             this.view.spawnVFX(newUnit.group.position, 'upgrade');
             this.view.toast(`NÂNG CẤP: ${newUnit.data.name} ${newUnit.star} SAO!`);
-            
             this.checkTriple(newUnit);
         }
     }
@@ -321,7 +259,6 @@ export class GameManager {
         e.stopPropagation();
         this.dragItem = index;
         this.dragItemEl = el;
-        
         const ghost = document.getElementById('drag-ghost');
         if(ghost) {
             ghost.classList.remove('hidden');
@@ -333,34 +270,25 @@ export class GameManager {
 
     async startCombat() {
         if(this.phase === 'combat') return;
-        
         const active = this.units.filter(u=>u.team==='player' && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench);
-        if(!active.length) {
-            this.view.toast("Không có tướng! Tự động thua.");
-        }
-        
+        if(!active.length) { this.view.toast("Không có tướng! Tự động thua."); }
         this.phase = 'combat';
         this.timer = TIMERS.COMBAT; 
         this.updateUIPhase(true); 
-        
         this.units.filter(u=>u.team==='enemy').forEach(u=>u.destroy()); 
         this.units = this.units.filter(u=>u.team==='player'); 
-
         const roundKey = `${this.stage}-${this.subRound}`;
         if (PVE_ROUNDS[roundKey]) {
             this.spawnPveEnemies(PVE_ROUNDS[roundKey]);
         } else {
-            // FIXED: Gọi hàm spawn PvP đã sửa
             await this.spawnPvpOpponent(active);
         }
-
         this.view.closeInspector();
     }
 
     spawnPveEnemies(monsterList) {
         this.view.toast("PVE ROUND START!");
         const enemyHexes = this.hexes.filter(h => !h.userData.isPlayer && !h.userData.occupied);
-        
         monsterList.forEach((mid, i) => {
             if (enemyHexes[i]) {
                 const mData = MONSTERS[mid];
@@ -376,75 +304,56 @@ export class GameManager {
         });
     }
 
-    // --- PVP LOGIC: FIXED ASYNC WAIT ---
     async spawnPvpOpponent(activeUnits) {
         if (this.mode === 'pvp') {
             this.view.toast("PVP: Đang chờ đối thủ...");
-            
-            // 1. Upload đội hình mình
             const myBoardData = this.serializeBoard(activeUnits);
             await update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), {
                 units: myBoardData,
                 ready: true
             });
-            
-            // 2. Lắng nghe đội hình địch (CÓ TIMEOUT & CHECK LIÊN TỤC)
             const enemyRef = ref(this.db, `matches/${this.matchId}/boards/${this.opponentId}`);
-            
             let found = false;
-            
-            // Hàm xử lý khi nhận dữ liệu
             const onData = (snap) => {
                 const data = snap.val();
                 if (data && data.ready && !found) {
                     found = true;
-                    off(enemyRef, 'value', onData); // Ngắt lắng nghe
+                    off(enemyRef, 'value', onData); 
                     this.spawnEnemyFromData(data.units);
                 }
             };
-
-            // Bắt đầu lắng nghe
             onValue(enemyRef, onData);
-
-            // Timeout an toàn: Nếu sau 8 giây không thấy địch -> Spawn Bot (Tránh treo game)
             setTimeout(() => {
                 if (!found) {
                     found = true;
                     off(enemyRef, 'value', onData);
                     this.view.toast("Đối thủ mất kết nối! Đấu với Bot.");
-                    this.spawnBotFallback(); // Fallback đánh bot
+                    this.spawnBotFallback(); 
                 }
             }, 8000);
-
         } else {
             this.spawnBotFallback();
         }
     }
 
-    // Tách logic đánh bot ra hàm riêng để tái sử dụng khi PvP lỗi
     spawnBotFallback() {
         this.view.toast("PVP START (vs BOT)!");
         const enemyHexes = this.hexes.filter(h => !h.userData.isPlayer && !h.userData.occupied);
         const shuffledHexes = enemyHexes.sort(() => 0.5 - Math.random());
-        
         let botLvl = Math.min(this.stage + 2, 9);
-        
         for(let i=0; i < botLvl; i++) {
             if(shuffledHexes[i]) {
                 const botUnitData = this.rollChamp(botLvl);
                 const enemy = this.createUnit(botUnitData, shuffledHexes[i], 'enemy');
-
                 const r = Math.random();
                 let targetStar = 1;
                 if (this.stage >= 3) { if (r < 0.3) targetStar = 2; }
                 if (this.stage >= 5) { if (r < 0.6) targetStar = 2; else if (r > 0.9) targetStar = 3; }
                 for(let s=1; s < targetStar; s++) enemy.upgradeStar();
-
                 if (this.stage >= 3 && Math.random() > 0.5) {
                     const itemKeys = Object.keys(ITEMS);
                     enemy.addItem(itemKeys[Math.floor(Math.random()*itemKeys.length)]);
                 }
-
                 enemy.hp = enemy.maxHp; 
                 enemy.updateBar();
             }
@@ -456,16 +365,11 @@ export class GameManager {
         this.timer = TIMERS.PREP; 
         this.updateUIPhase(false);
         this.view.targetPos = this.view.zoomLevels[1].pos.clone(); 
-        
-        if(win) { 
-            this.ehp-=10; this.view.toast("CHIẾN THẮNG!"); 
-        } else { 
+        if(win) { this.ehp-=10; this.view.toast("CHIẾN THẮNG!"); } 
+        else { 
             this.php-=10; this.view.toast("THẤT BẠI!"); 
-            if(this.mode === 'pvp') {
-                update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { hp: this.php });
-            }
+            if(this.mode === 'pvp') { update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { hp: this.php }); }
         }
-        
         if(this.php<=0 || this.ehp<=0) { 
             document.getElementById('game-over').classList.remove('hidden'); 
             const result = this.php > this.ehp ? "THẮNG" : "THUA"; 
@@ -473,30 +377,18 @@ export class GameManager {
             this.isGameStarted = false; 
             return; 
         }
-        
         this.subRound++; 
-        if(this.subRound > 6) { 
-            this.subRound = 1; 
-            this.stage++; 
-            this.view.toast(`LÊN STAGE ${this.stage}!`);
-        }
-
+        if(this.subRound > 6) { this.subRound = 1; this.stage++; this.view.toast(`LÊN STAGE ${this.stage}!`); }
         this.checkAugmentRound();
-
         const maxInterest = this.augments.find(a => a.id === 'rich_get_richer') ? 7 : 5;
         const interest = Math.min(Math.floor(this.gold / 10), maxInterest); 
         this.gold += (5 + interest + (win?1:0)); this.xp += 2;
-        
         this.units.forEach(u => { if(u.team==='player') u.reset(); else u.destroy(); }); 
         this.units = this.units.filter(u=>u.team==='player');
         if(this.xp >= this.getXpNeed()) { this.xp-=this.getXpNeed(); this.lvl++; }
         if(!this.isShopLocked) this.refreshShop();
-        
         this.view.updateUI();
-
-        if(this.mode === 'pvp') {
-            update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), { ready: false });
-        }
+        if(this.mode === 'pvp') { update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), { ready: false }); }
     }
 
     updateUIPhase(isCombat) {
@@ -509,15 +401,12 @@ export class GameManager {
         this.pillarGroup = new THREE.Group();
         this.pillarGroup.position.set(-15, 0, 0); 
         this.pillarGroup.scale.set(0.8, 0.8, 0.8); 
-
         const geo = new THREE.CylinderGeometry(1.5, 2, 4, 8);
         const mat = new THREE.MeshStandardMaterial({ color: 0x1a2a3a, roughness: 0.3, metalness: 0.8, emissive: 0x055861, emissiveIntensity: 0.2 });
         const body = new THREE.Mesh(geo, mat); body.position.y = 2; body.castShadow = true; this.pillarGroup.add(body);
-
         const ringGeo = new THREE.TorusGeometry(1.6, 0.1, 4, 16);
         const ringMat = new THREE.MeshBasicMaterial({ color: 0x0acde3 });
         const ring = new THREE.Mesh(ringGeo, ringMat); ring.rotation.x = Math.PI/2; ring.position.y = 3.8; this.pillarGroup.add(ring);
-
         for(let i=0; i<3; i++) {
             const iconGeo = new THREE.PlaneGeometry(2.2, 2.2);
             const iconMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, visible: false, side: THREE.DoubleSide });
@@ -525,7 +414,6 @@ export class GameManager {
             iconMesh.position.set(0, 5.5 + (i * 2.8), 0);
             this.pillarIcons.push(iconMesh); this.pillarGroup.add(iconMesh);
         }
-
         const light = new THREE.PointLight(0x0acde3, 1, 10);
         light.position.set(0, 5, 2); this.pillarGroup.add(light);
         this.view.scene.add(this.pillarGroup);
@@ -549,9 +437,7 @@ export class GameManager {
 
     checkAugmentRound() {
         const roundKey = `${this.stage}-${this.subRound}`;
-        if (AUGMENT_ROUNDS.includes(roundKey)) {
-            setTimeout(() => this.triggerAugmentSelection(), 800);
-        }
+        if (AUGMENT_ROUNDS.includes(roundKey)) { setTimeout(() => this.triggerAugmentSelection(), 800); }
     }
 
     triggerAugmentSelection() {
@@ -559,13 +445,10 @@ export class GameManager {
         const container = document.getElementById('augment-cards-container');
         const closeBtn = document.getElementById('btn-close-aug');
         const title = document.getElementById('aug-modal-title');
-        
         if (!modal || !container) return;
-
         closeBtn.classList.add('hidden'); 
         title.innerText = "LỰA CHỌN LÕI CÔNG NGHỆ";
         container.innerHTML = ''; 
-
         const choices = [];
         for (let i = 0; i < 3; i++) {
             if (this.augmentPool.length === 0) break;
@@ -573,7 +456,6 @@ export class GameManager {
             choices.push(this.augmentPool[idx]);
             this.augmentPool.splice(idx, 1);
         }
-
         choices.forEach(aug => {
             const card = this.createAugmentCard(aug);
             card.onclick = () => {
@@ -582,7 +464,6 @@ export class GameManager {
             };
             container.appendChild(card);
         });
-
         modal.classList.remove('hidden');
     }
 
@@ -591,19 +472,15 @@ export class GameManager {
         const container = document.getElementById('augment-cards-container');
         const closeBtn = document.getElementById('btn-close-aug');
         const title = document.getElementById('aug-modal-title');
-
         if (!modal || !container || this.augments.length === 0) return;
-
         closeBtn.classList.remove('hidden'); 
         title.innerText = "LÕI CÔNG NGHỆ ĐÃ SỞ HỮU";
         container.innerHTML = '';
-
         this.augments.forEach(aug => {
             const card = this.createAugmentCard(aug);
             card.classList.add('info-only');
             container.appendChild(card);
         });
-
         modal.classList.remove('hidden');
     }
 
@@ -615,7 +492,6 @@ export class GameManager {
         if (aug.type === 'def') icon = '🛡️';
         if (aug.type === 'eco') icon = '💰';
         if (aug.type === 'item') icon = '🎁';
-
         card.innerHTML = `<div class="aug-icon">${icon}</div><div class="aug-name">${aug.name}</div><div class="aug-desc">${aug.desc}</div>`;
         return card;
     }
@@ -687,28 +563,56 @@ export class GameManager {
     }
 
     initInput() {
-        const handler = (e) => {
-            if (!this.isGameStarted) return;
-            if (this.dragged || this.dragItem !== null) { if (e.cancelable) e.preventDefault(); }
-            let cx, cy; if(e.changedTouches && e.changedTouches.length > 0) { cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY; } else { cx = e.clientX; cy = e.clientY; }
-            if (cx === undefined || isNaN(cx)) return;
-            const fake = { clientX: cx, clientY: cy, target: e.target, touches: e.touches };
-            if(e.type==='mousedown' || e.type==='touchstart') this.onDown(fake); 
-            if(e.type==='mousemove' || e.type==='touchmove') this.onMove(fake); 
-            if(e.type==='mouseup' || e.type==='touchend') this.onUp(fake);
-        };
-        ['mousedown','mousemove','mouseup','touchstart','touchmove','touchend'].forEach(t => window.addEventListener(t, handler, {passive: false}));
+        const handler = (e) => this.handleInput(e);
+        const opts = { passive: false }; 
+
+        window.addEventListener('mousedown', handler);
+        window.addEventListener('mousemove', handler);
+        window.addEventListener('mouseup', handler);
+        
+        window.addEventListener('touchstart', handler, opts);
+        window.addEventListener('touchmove', handler, opts);
+        window.addEventListener('touchend', handler, opts);
+
         const closeAug = document.getElementById('btn-close-aug');
         if(closeAug) closeAug.onclick = () => { document.getElementById('augment-modal').classList.add('hidden'); };
     }
+    
+    handleInput(e) {
+        if (!this.isGameStarted) return;
+        
+        const isTouch = e.type.startsWith('touch');
+        if (this.dragged || this.dragItem !== null || (isTouch && this.isDragging)) {
+            if (e.cancelable) e.preventDefault(); 
+        }
+
+        let cx, cy;
+        if (isTouch) {
+            if (e.touches && e.touches.length > 0) {
+                cx = e.touches[0].clientX; cy = e.touches[0].clientY;
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY;
+            }
+        } else {
+            cx = e.clientX; cy = e.clientY;
+        }
+
+        if (cx === undefined || isNaN(cx)) return;
+        
+        const type = e.type;
+        const fakeEvent = { clientX: cx, clientY: cy, target: e.target, type: type };
+
+        if(type === 'mousedown' || type === 'touchstart') this.onDown(fakeEvent);
+        else if(type === 'mousemove' || type === 'touchmove') this.onMove(fakeEvent);
+        else if(type === 'mouseup' || type === 'touchend') this.onUp(fakeEvent);
+    }
 
     listenMatchState() { 
-        // Lắng nghe HP đối thủ và cập nhật UI ngay lập tức
         onValue(ref(this.db, `matches/${this.matchId}/states/${this.opponentId}/hp`), (snap) => { 
             const hp = snap.val(); 
             if (hp !== null) { 
                 this.ehp = hp; 
-                this.view.updateUI(); // Cập nhật ngay khi có thay đổi
+                this.view.updateUI(); 
                 if(this.ehp <= 0) this.endCombat(true); 
             } 
         }); 
@@ -743,10 +647,13 @@ export class GameManager {
         if(this.dragged) {
             const moveDist = Math.abs(e.clientX - this.clickStart.x) + Math.abs(e.clientY - this.clickStart.y);
             if(moveDist > 5) this.isDragging = true;
+            
             const hits = this.ray.intersectObject(this.view.dragPlane); 
             if(hits.length) { this.dragGroup.position.x = hits[0].point.x; this.dragGroup.position.z = hits[0].point.z; }
+            
             const sell = document.getElementById('sell-slot'); const el = document.elementFromPoint(e.clientX, e.clientY);
             if(el && el.closest('#sell-slot')) sell.style.borderColor = 'white'; else sell.style.borderColor = '#e74c3c';
+            
             if(this.hoveredHex) { this.hoveredHex.material.emissive.setHex(0x000000); this.hoveredHex=null; }
             const hHits = this.ray.intersectObjects(this.hexes);
             if(hHits.length) { const h = hHits[0].object; if(h.userData.isPlayer) { this.hoveredHex = h; const ok = !h.userData.occupied || h===this.dragged.userData.hex; h.material.emissive.setHex(ok?0x00ff00:0xff0000); } }
@@ -859,7 +766,7 @@ export class GameManager {
     }
     getXpNeed() { return XP_TO_LEVEL[this.lvl] || 9999; }
     
-    updateGhostPos(e) { let cx, cy; if(e.touches && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; } else { cx = e.clientX; cy = e.clientY; } const ghost = document.getElementById('drag-ghost'); ghost.style.left = (cx - 20) + 'px'; ghost.style.top = (cy - 20) + 'px'; }
+    updateGhostPos(e) { let cx, cy; if(e.touches && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; } else if (e.changedTouches && e.changedTouches.length > 0) { cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY; } else { cx = e.clientX; cy = e.clientY; } const ghost = document.getElementById('drag-ghost'); ghost.style.left = (cx - 20) + 'px'; ghost.style.top = (cy - 20) + 'px'; }
     updateRay(cx, cy) { this.mouse.x = (cx/window.innerWidth)*2-1; this.mouse.y = -(cy/window.innerHeight)*2+1; this.ray.setFromCamera(this.mouse, this.view.camera); }
 }
 
