@@ -1,7 +1,3 @@
-// 3d.js
-// CẬP NHẬT: THÊM VFX 'AUGMENT_SELECT' (BÙNG NỔ HEXTECH)
-
-// --- HELPER: TEXTURE & MATERIALS ---
 const createGlowTexture = () => {
     const canvas = document.createElement('canvas');
     canvas.width = 64; canvas.height = 64;
@@ -16,7 +12,6 @@ const createGlowTexture = () => {
 };
 const particleTex = createGlowTexture();
 
-// Helper tạo vòng sóng xung kích
 const createShockwave = (color, size = 1) => {
     const geo = new THREE.RingGeometry(0.2 * size, 1 * size, 32);
     const mat = new THREE.MeshBasicMaterial({ 
@@ -28,9 +23,6 @@ const createShockwave = (color, size = 1) => {
     return mesh;
 };
 
-// ==========================================
-// 1. VISUAL EFFECT: KỸ NĂNG FULL TƯỚNG & HỆ THỐNG
-// ==========================================
 export class VisualEffect {
     constructor(scene, pos, type) {
         this.scene = scene; 
@@ -44,7 +36,6 @@ export class VisualEffect {
         this.lights = [];
         this.subMeshes = []; 
 
-        // Helper Particle
         const createParticles = (count, color, size, speed, spread=1, vertical=false) => {
             const mat = new THREE.SpriteMaterial({ 
                 map: particleTex, color: color, transparent: true, opacity: 0.8,
@@ -67,30 +58,19 @@ export class VisualEffect {
             l.position.y = 1; this.mesh.add(l); this.lights.push(l); 
         };
 
-        // --- XỬ LÝ TỪNG KỸ NĂNG ---
-
-        // 0. HỆ THỐNG: CHỌN THẺ BÀI (NEW!)
         if (type === 'augment_select') {
-            // Cột sáng Hextech bùng lên
             const beamGeo = new THREE.CylinderGeometry(0.5, 0.5, 20, 16);
             const beamMat = new THREE.MeshBasicMaterial({ color: 0x0acde3, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending });
             this.mainObj = new THREE.Mesh(beamGeo, beamMat);
             this.mainObj.position.y = 10;
             this.mesh.add(this.mainObj);
-
-            // Sóng xung kích lan rộng
             this.shockwaves = [createShockwave(0x0acde3, 3), createShockwave(0xffffff, 1)];
             this.shockwaves.forEach(s => this.mesh.add(s));
-
-            // Hạt năng lượng bay lên (Xanh + Vàng)
             createParticles(20, 0x0acde3, 1.2, 0.8, 2, true);
             createParticles(15, 0xffd700, 0.8, 1.0, 2, true);
-            
             createLight(0x0acde3, 5, 10);
             this.maxLife = 40;
         }
-
-        // 1. GAREN: XOAY KIẾM (Vàng)
         else if (type === 'spin' || type === 'spin_gold') { 
             const geo = new THREE.TorusGeometry(3, 0.2, 2, 16);
             const mat = new THREE.MeshBasicMaterial({ color: 0xffd700, transparent:true, opacity:0.6, blending: THREE.AdditiveBlending });
@@ -103,8 +83,6 @@ export class VisualEffect {
             createLight(0xffaa00, 2, 6);
             this.maxLife = 45;
         } 
-        
-        // 2. DARIUS: MÁY CHÉM (Rìu đỏ)
         else if (type === 'guillotine' || type === 'red_beam') { 
             const shape = new THREE.Shape(); shape.moveTo(0,0); shape.lineTo(1,3); shape.lineTo(2,4); shape.lineTo(3,3); shape.lineTo(0,0);
             const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.2, bevelEnabled: false });
@@ -117,16 +95,12 @@ export class VisualEffect {
             createParticles(30, 0xff0000, 0.6, 1.0, 1.5); createLight(0xff0000, 4, 8); 
             this.maxLife = 20;
         }
-        
-        // 3. VI: ĐẤM (Hồng)
         else if (type === 'uppercut' || type === 'pink_explosion') { 
             this.shockwaves = [createShockwave(0xff00ff, 1.5), createShockwave(0xffffff, 0.5)];
             this.shockwaves.forEach(s => this.mesh.add(s));
             createParticles(30, 0xff55ff, 1.0, 1.2, 1.0, true); createLight(0xff00ff, 3, 6); 
             this.maxLife = 20;
         }
-        
-        // 4. RIVEN: CHÉM GIÓ (Xanh lá)
         else if (type === 'wind_slash' || type === 'green_wave') { 
             const geo = new THREE.RingGeometry(3, 4, 32, 1, -Math.PI/2, Math.PI);
             const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending });
@@ -135,8 +109,6 @@ export class VisualEffect {
             createParticles(20, 0xccffcc, 0.5, 0.5, 3);
             this.maxLife = 20;
         }
-        
-        // 5. YASUO: LỐC (Xám)
         else if (type === 'tornado' || type === 'tornado_grey') { 
             for(let i=0; i<4; i++) {
                 const geo = new THREE.ConeGeometry(1 + i*0.8, 3, 16, 1, true);
@@ -148,8 +120,6 @@ export class VisualEffect {
             createParticles(30, 0xffffff, 0.4, 0.8, 2, true); 
             this.maxLife = 40;
         }
-
-        // 6. POPPY: BÚA (Vàng đất)
         else if (type === 'hammer_smash' || type === 'yellow_smash') {
             const head = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1), new THREE.MeshStandardMaterial({color: 0xcd853f}));
             head.position.y = 1;
@@ -158,8 +128,6 @@ export class VisualEffect {
             createParticles(20, 0xffffaa, 0.8, 0.5, 2);
             this.maxLife = 20;
         }
-
-        // 7. MALPHITE: DẬM ĐẤT (Đá bay lên)
         else if (type === 'ground_slam' || type === 'rock_explosion') {
             for(let i=0; i<6; i++) {
                 const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5), new THREE.MeshStandardMaterial({color: 0x8b4513}));
@@ -171,8 +139,6 @@ export class VisualEffect {
             createParticles(30, 0x5c4033, 0.6, 0.8, 3);
             this.maxLife = 25;
         }
-
-        // 8. FIORA: PHẢN ĐÒN (Chớp sáng vàng kim)
         else if (type === 'grand_challenge' || type === 'vital_break') {
             const geo = new THREE.PlaneGeometry(3, 3);
             const mat = new THREE.MeshBasicMaterial({color: 0xffffaa, transparent: true, opacity: 1, side: THREE.DoubleSide, blending: THREE.AdditiveBlending});
@@ -181,8 +147,6 @@ export class VisualEffect {
             createParticles(20, 0xffff00, 0.5, 1.0, 1);
             this.maxLife = 15;
         }
-        
-        // 9. LEONA: THÁI DƯƠNG (Cột vàng)
         else if (type === 'solar_flare' || type === 'solar_beam') { 
             const beamGeo = new THREE.CylinderGeometry(2, 2, 20, 32);
             const beamMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent:true, opacity:0.6, blending: THREE.AdditiveBlending });
@@ -191,8 +155,6 @@ export class VisualEffect {
             createParticles(40, 0xffff00, 1.0, 1.5, 3); createLight(0xffaa00, 5, 12); 
             this.maxLife = 30;
         }
-
-        // 10. BRAUM: BĂNG ĐỊA CHẤN (Gai băng)
         else if (type === 'ice_fissure' || type === 'ice_spikes') { 
             for(let i=0; i<6; i++) {
                 const s = new THREE.Mesh(new THREE.ConeGeometry(0.6, 2+Math.random(), 4), new THREE.MeshStandardMaterial({color:0x00ffff, emissive: 0x0055ff}));
@@ -202,24 +164,18 @@ export class VisualEffect {
             createParticles(25, 0xaaffff, 0.6, 0.5, 2); createLight(0x00ffff, 3, 8);
             this.maxLife = 35;
         }
-
-        // 11. VAYNE: MŨI TÊN BẠC (Vòng bạc tỏa ra)
         else if (type === 'silver_bolts' || type === 'silver_ring') {
             this.shockwaves = [createShockwave(0xffffff, 1.0)]; 
             this.mesh.add(this.shockwaves[0]);
             createParticles(15, 0xcccccc, 0.5, 0.8, 1);
             this.maxLife = 15;
         }
-
-        // 12. CAITLYN: BÁCH PHÁT (Tâm ngắm đỏ thu vào)
         else if (type === 'ace_shot') { 
             const sw = createShockwave(0xff0000, 1.5);
             this.mesh.add(sw); this.shockwaves = [sw];
             createParticles(20, 0xff0000, 0.8, 1.2, 1); createLight(0xff0000, 3, 5);
             this.maxLife = 20;
         }
-
-        // 13. VARUS: TRÓI (Dây tím)
         else if (type === 'corruption' || type === 'purple_root') {
             for(let i=0; i<5; i++) {
                 const vine = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.2, 3, 8), new THREE.MeshStandardMaterial({color: 0x800080}));
@@ -231,15 +187,11 @@ export class VisualEffect {
             createParticles(20, 0xaa00aa, 0.6, 0.5, 2);
             this.maxLife = 30;
         }
-
-        // 14. ASHE: ĐẠI BĂNG TIỄN (Nổ băng)
         else if (type === 'crystal_arrow') {
             this.shockwaves = [createShockwave(0x00ffff, 2)]; this.mesh.add(this.shockwaves[0]);
             createParticles(40, 0xaaffff, 0.8, 1.5, 3); createLight(0x00ffff, 4, 8);
             this.maxLife = 25;
         }
-        
-        // 15. LUX: CẦU VỒNG (Laser)
         else if (type === 'final_spark' || type === 'rainbow_laser') { 
             const coreGeo = new THREE.CylinderGeometry(0.4, 0.4, 40, 8);
             const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent:true, opacity:1 });
@@ -251,8 +203,6 @@ export class VisualEffect {
             createParticles(40, 0xffeeff, 0.8, 1.0, 1); createLight(0xffffff, 3, 10);
             this.maxLife = 20; 
         }
-
-        // 16. JHIN: HOA NỞ (Đỏ)
         else if (type === 'curtain_call' || type === 'jhin_flower') {
             for(let i=0; i<4; i++) {
                 const geo = new THREE.TorusGeometry(1.5, 0.1, 4, 20); 
@@ -263,8 +213,6 @@ export class VisualEffect {
             createParticles(20, 0xff0000, 0.5, 0.5, 2); createLight(0xff0000, 3, 5);
             this.maxLife = 30;
         }
-
-        // 17. ZIGGS: BOM (Nấm tím)
         else if (type === 'purple_bomb' || type === 'bouncing_bomb') {
             const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.2, 2, 8), new THREE.MeshBasicMaterial({color:0x555555})); stem.position.y = 1;
             const cap = new THREE.Mesh(new THREE.SphereGeometry(1.5, 16, 8, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshBasicMaterial({color:0xaa00aa})); cap.position.y = 2;
@@ -273,8 +221,6 @@ export class VisualEffect {
             createParticles(30, 0xffaa00, 1.0, 1.5, 2.5); createLight(0xff5500, 4, 8);
             this.maxLife = 30;
         }
-
-        // 18. TF: BÀI (3 lá bay ra)
         else if (type === 'wild_cards' || type === 'card_throw') {
             const colors = [0xff0000, 0x0000ff, 0xffff00];
             colors.forEach((c, i) => {
@@ -285,8 +231,6 @@ export class VisualEffect {
             });
             this.maxLife = 20;
         }
-
-        // 19. ANNIE: KHIÊN LỬA (Cầu cam)
         else if (type === 'disintegrate' || type === 'fire_shield') {
              const geo = new THREE.SphereGeometry(2.5, 16, 16);
              const mat = new THREE.MeshBasicMaterial({ color: 0xff5500, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending });
@@ -294,8 +238,6 @@ export class VisualEffect {
              createParticles(20, 0xffaa00, 1.0, 0.5, 2.5); createLight(0xff5500, 3, 5);
              this.maxLife = 30;
         }
-
-        // 20. VELKOZ: TIA HƯ KHÔNG (Tím)
         else if (type === 'void_ray' || type === 'life_form_ray') {
              const geo = new THREE.CylinderGeometry(0.6, 0.8, 25, 16);
              const mat = new THREE.MeshBasicMaterial({ color: 0x8e44ad, transparent:true, opacity:0.8, blending: THREE.AdditiveBlending });
@@ -304,8 +246,6 @@ export class VisualEffect {
              createParticles(30, 0xda70d6, 0.8, 0.5, 1); createLight(0x8e44ad, 3, 8);
              this.maxLife = 30;
         }
-
-        // 21. KHAZIX/TALON: CHÉM (X)
         else if (type === 'void_slash' || type === 'noxus_stab') {
             const color = type === 'void_slash' ? 0x8800ff : 0xaa0000;
             const geo = new THREE.BoxGeometry(0.2, 0.2, 4);
@@ -316,8 +256,6 @@ export class VisualEffect {
             createParticles(15, color, 0.5, 0.8, 1.5);
             this.maxLife = 15;
         }
-
-        // 22. NOCTURNE/KATARINA: XOAY (Bóng tối/Đỏ)
         else if (type === 'death_lotus' || type === 'shadow_spin' || type === 'umbra_blades') {
             const isNoc = type === 'umbra_blades';
             const color = isNoc ? 0x222222 : 0xff0000;
@@ -328,8 +266,6 @@ export class VisualEffect {
             createParticles(40, color, 0.6, 1.0, 3.5);
             this.maxLife = 40;
         }
-
-        // 23. ZED: SHURIKEN (Phi tiêu xoay)
         else if (type === 'razor_shuriken' || type === 'shuriken') {
             const geo = new THREE.CylinderGeometry(1, 1, 0.1, 4); 
             const mat = new THREE.MeshBasicMaterial({ color: 0x333333, emissive: 0xffffff, emissiveIntensity: 0.2 });
@@ -338,8 +274,6 @@ export class VisualEffect {
             createParticles(15, 0x000000, 0.5, 1.0, 1);
             this.maxLife = 20;
         }
-
-        // 24. UPGRADE (Vàng)
         else if (type === 'upgrade') {
              const geo = new THREE.CylinderGeometry(2, 2, 10, 16, 1, true);
              const mat = new THREE.MeshBasicMaterial({ color: 0xffff88, transparent:true, opacity:0.5, blending:THREE.AdditiveBlending, side:THREE.DoubleSide });
@@ -347,8 +281,6 @@ export class VisualEffect {
              createParticles(30, 0xffffaa, 0.8, 0.8, 1, true); createLight(0xffff00, 2, 5);
              this.maxLife = 40;
         }
-
-        // 25. MẶC ĐỊNH (Basic Attack)
         else { 
             createParticles(5, 0xffffff, 0.3, 0.5, 0.5); 
             this.maxLife = 10;
@@ -375,7 +307,7 @@ export class VisualEffect {
             else if (this.type.includes('guillotine')) { if (p < 0.3) this.mainObj.position.y -= 1.5; this.mainObj.material.opacity = 1 - p; }
             else if (this.type.includes('wind_slash')) { this.mainObj.position.z += 0.8; this.mainObj.scale.multiplyScalar(1.05); this.mainObj.material.opacity = 1 - p; }
             else if (this.type.includes('void_ray')) { this.mainObj.scale.x = 1 + Math.sin(this.life)*0.2; this.mainObj.material.opacity = 1 - p; }
-            else if (this.type.includes('augment')) { this.mainObj.material.opacity = 1 - p; this.mainObj.scale.x = 1 - p*0.5; this.mainObj.scale.z = 1 - p*0.5; } // Augment beam fade
+            else if (this.type.includes('augment')) { this.mainObj.material.opacity = 1 - p; this.mainObj.scale.x = 1 - p*0.5; this.mainObj.scale.z = 1 - p*0.5; }
             else if (this.type.includes('card_throw')) {
                 this.mainObj.children.forEach(c => {
                     c.position.x += Math.sin(c.userData.angle) * 0.5;
@@ -410,7 +342,6 @@ export class VisualEffect {
     }
 }
 
-// 2. PROJECTILE & UNIT FACTORY GIỮ NGUYÊN
 export class Projectile {
     constructor(scene, start, target, color, dmg, isStun = false) {
         this.scene = scene; this.target = target; this.dmg = dmg; this.isStun = isStun; this.speed = 1.2; this.isHit = false;
@@ -542,7 +473,7 @@ export const UnitFactory = {
             group.add(wGroup);
         }
 
-        const hit = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshBasicMaterial({visible:false})); 
+        const hit = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshBasicMaterial({ visible: true, transparent: true, opacity: 0, depthWrite: false })); 
         hit.userData = { isUnit:true, data: data, hex: hex, team: team }; hit.name = 'hitbox'; group.add(hit);
         
         const s = (data.scale || 1.3) * 1.1; 
