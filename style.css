@@ -228,7 +228,17 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px;
 .btn-primary:active { transform: translateY(4px); box-shadow: none; }
 
 /* --- AUGMENT MODAL (FIXED) --- */
-#augment-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); z-index: 3500; display: flex; justify-content: center; align-items: center; backdrop-filter: blur(8px); }
+#augment-modal { 
+    position: fixed; 
+    inset: 0; 
+    background: rgba(0, 0, 0, 0.9); 
+    z-index: 3500; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    backdrop-filter: blur(8px); 
+    pointer-events: auto; /* QUAN TRỌNG: Cho phép click chuột vào modal */
+}
 #aug-modal-content { display: flex; flex-direction: column; align-items: center; gap: 30px; width: 100%; max-width: 1000px; padding: 20px; position: relative; }
 .aug-title { color: var(--hextech); font-size: 2.5rem; text-transform: uppercase; letter-spacing: 3px; text-shadow: 0 0 20px var(--hextech); margin: 0; text-align: center; }
 #augment-cards-container { display: flex; gap: 30px; justify-content: center; align-items: stretch; flex-wrap: wrap; }

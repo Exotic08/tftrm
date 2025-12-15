@@ -482,6 +482,9 @@ export class GameManager {
         this.units.filter(u => u.team === 'enemy').forEach(u => u.destroy());
         this.units = this.units.filter(u => u.team === 'player');
         
+        // --- SỬA LỖI: Buộc thoát khỏi trạng thái chờ khi chọn lõi ---
+        this.isWaiting = false;
+        
         const modal = document.getElementById('augment-modal');
         const container = document.getElementById('augment-cards-container');
         const closeBtn = document.getElementById('btn-close-aug');
