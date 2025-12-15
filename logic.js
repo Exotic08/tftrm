@@ -1,7 +1,7 @@
 import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS } from './shared.js';
 import { Unit, ViewManager } from './engine.js';
 import { UnitFactory } from './3d.js'; 
-import { ref, update, onValue, set, off } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+import { ref, update, onValue, set, off, get } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
 
 function createIconTexture(text, color) {
     const canvas = document.createElement('canvas');
@@ -22,7 +22,6 @@ function createIconTexture(text, color) {
     return new THREE.CanvasTexture(canvas);
 }
 
-// MONKEY PATCH UNIT
 const originalUpdateStats = Unit.prototype.updateStats;
 Unit.prototype.updateStats = function() {
     originalUpdateStats.call(this); 
@@ -64,6 +63,10 @@ export class GameManager {
         this.timer = TIMERS.PREP; 
         this.lastTime = 0; 
         
+        // Trạng thái chờ đồng bộ PvP
+        this.isWaiting = false;
+        this.pendingResult = null;
+
         const components = Object.keys(ITEMS).filter(key => ITEMS[key].isComponent);
         const randomStartItem = components[Math.floor(Math.random() * components.length)];
         this.inventory = [randomStartItem];
@@ -82,7 +85,7 @@ export class GameManager {
         try { 
             this.view.init(); 
             this.createAugmentPillar3D(); 
-            this.initInput(); // KHỞI TẠO INPUT
+            this.initInput();
             this.view.renderInventory(); 
             
             if(this.mode === 'pvp') {
@@ -101,14 +104,14 @@ export class GameManager {
         const dt = (now - this.lastTime) / 1000; 
         this.lastTime = now;
 
-        if (this.isGameStarted) {
+        if (this.isGameStarted && !this.isWaiting) {
             this.updateTimer(dt);
         }
 
         this.view.updateCamera();
         this.units.forEach(u => u.update(now * 0.001, this.units)); 
         
-        if(this.phase === 'combat') {
+        if(this.phase === 'combat' && !this.isWaiting) {
             const playerLive = this.units.filter(u => u.team === 'player' && !u.isDead && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench).length;
             const enemyLive = this.units.filter(u => u.team === 'enemy' && !u.isDead).length;
             if (playerLive === 0) this.endCombat(false); 
@@ -164,10 +167,6 @@ export class GameManager {
             }
         }
     }
-
-    // ... (Giữ nguyên các hàm autoDeploy, createUnit, buyUnit, sellUnit, checkTriple, handleItemStart, startCombat, spawnPveEnemies, spawnPvpOpponent, spawnBotFallback, endCombat, updateUIPhase, createAugmentPillar3D, updateAugmentPillar3D, checkAugmentRound, triggerAugmentSelection, showAugmentInfo, createAugmentCard, selectAugment, onMonsterDeath, serializeBoard, spawnEnemyFromData, listenMatchState) ...
-    // ĐỂ CODE GỌN, TÔI ĐÃ GIỮ CÁC HÀM LOGIC GAME CŨ KHÔNG ĐỔI Ở ĐÂY.
-    // DƯỚI ĐÂY LÀ PHẦN SỬA LỖI INPUT QUAN TRỌNG:
 
     autoDeploy() {
         const limitBonus = this.augments.find(a => a.id === 'new_recruit') ? 1 : 0;
@@ -365,16 +364,39 @@ export class GameManager {
         }
     }
 
+    // --- LOGIC KẾT THÚC VÒNG ĐẤU ĐÃ SỬA (SYNC PVP) ---
     endCombat(win) {
-        this.phase = 'prep';
-        this.timer = TIMERS.PREP; 
-        this.updateUIPhase(false);
-        this.view.targetPos = this.view.zoomLevels[1].pos.clone(); 
         if(win) { this.ehp-=10; this.view.toast("CHIẾN THẮNG!"); } 
         else { 
             this.php-=10; this.view.toast("THẤT BẠI!"); 
-            if(this.mode === 'pvp') { update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { hp: this.php }); }
         }
+
+        // Logic cũ được tách ra:
+        if (this.mode === 'pvp') {
+            // PvP: Bật cờ chờ, gửi kết quả lên server
+            this.isWaiting = true;
+            this.pendingResult = win;
+            this.view.toast("Đang đợi đối thủ kết thúc...");
+            update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { 
+                hp: this.php,
+                finished: true 
+            });
+        } else {
+            // PvE: Kết thúc ngay như bình thường
+            this.finalizeRound(win);
+        }
+    }
+
+    // Hàm mới: Chỉ chạy khi cả 2 người chơi đều xong (hoặc PvE)
+    finalizeRound(win) {
+        this.isWaiting = false; // Tắt trạng thái chờ
+        
+        // Reset cờ finished trên server để chuẩn bị vòng sau
+        if(this.mode === 'pvp') {
+            update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { finished: false });
+            update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), { ready: false });
+        }
+
         if(this.php<=0 || this.ehp<=0) { 
             document.getElementById('game-over').classList.remove('hidden'); 
             const result = this.php > this.ehp ? "THẮNG" : "THUA"; 
@@ -382,18 +404,26 @@ export class GameManager {
             this.isGameStarted = false; 
             return; 
         }
+
+        this.phase = 'prep';
+        this.timer = TIMERS.PREP; 
+        this.updateUIPhase(false);
+        this.view.targetPos = this.view.zoomLevels[1].pos.clone(); 
+
         this.subRound++; 
         if(this.subRound > 6) { this.subRound = 1; this.stage++; this.view.toast(`LÊN STAGE ${this.stage}!`); }
         this.checkAugmentRound();
+        
         const maxInterest = this.augments.find(a => a.id === 'rich_get_richer') ? 7 : 5;
         const interest = Math.min(Math.floor(this.gold / 10), maxInterest); 
         this.gold += (5 + interest + (win?1:0)); this.xp += 2;
+        
         this.units.forEach(u => { if(u.team==='player') u.reset(); else u.destroy(); }); 
         this.units = this.units.filter(u=>u.team==='player');
+        
         if(this.xp >= this.getXpNeed()) { this.xp-=this.getXpNeed(); this.lvl++; }
         if(!this.isShopLocked) this.refreshShop();
         this.view.updateUI();
-        if(this.mode === 'pvp') { update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), { ready: false }); }
     }
 
     updateUIPhase(isCombat) {
@@ -567,83 +597,69 @@ export class GameManager {
         });
     }
 
-    // --- FIX QUAN TRỌNG: CẢM ỨNG & RAYCASTER ---
-    
     initInput() {
         const handler = (e) => this.handleInput(e);
-        // Passive: false để có thể gọi preventDefault() chặn scroll
         const opts = { passive: false }; 
-
-        // Gắn vào DOMElement của ThreeJS (Canvas) thay vì window để chính xác hơn
         const canvas = this.view.renderer.domElement;
-
         canvas.addEventListener('mousedown', handler);
         window.addEventListener('mousemove', handler);
         window.addEventListener('mouseup', handler);
-        
         canvas.addEventListener('touchstart', handler, opts);
         window.addEventListener('touchmove', handler, opts);
         window.addEventListener('touchend', handler, opts);
-
         const closeAug = document.getElementById('btn-close-aug');
         if(closeAug) closeAug.onclick = () => { document.getElementById('augment-modal').classList.add('hidden'); };
     }
     
     handleInput(e) {
         if (!this.isGameStarted) return;
-        
         const isTouch = e.type.startsWith('touch');
-        
-        // Chặn scroll khi đang kéo thả
         if (this.dragged || this.dragItem !== null || (isTouch && this.isDragging)) {
             if (e.cancelable) e.preventDefault(); 
         }
-
         let cx, cy;
         if (isTouch) {
-            if (e.touches && e.touches.length > 0) {
-                cx = e.touches[0].clientX; cy = e.touches[0].clientY;
-            } else if (e.changedTouches && e.changedTouches.length > 0) {
-                cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY;
-            }
-        } else {
-            cx = e.clientX; cy = e.clientY;
-        }
-
+            if (e.touches && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; } 
+            else if (e.changedTouches && e.changedTouches.length > 0) { cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY; }
+        } else { cx = e.clientX; cy = e.clientY; }
         if (cx === undefined || isNaN(cx)) return;
-        
         const fakeEvent = { clientX: cx, clientY: cy, target: e.target };
-
         if(e.type === 'mousedown' || e.type === 'touchstart') this.onDown(fakeEvent);
-        else if(e.type === 'mousemove' || e.type === 'touchmove') this.onMove(fakeEvent);
-        else if(e.type === 'mouseup' || e.type === 'touchend') this.onUp(fakeEvent);
+        else if(e.type === 'mousemove' || type === 'touchmove') this.onMove(fakeEvent);
+        else if(e.type === 'mouseup' || type === 'touchend') this.onUp(fakeEvent);
     }
 
     updateRay(cx, cy) { 
-        // FIX: Tính toán dựa trên kích thước thật của Canvas
-        // Thay vì dùng window.innerWidth (có thể bị sai do thanh địa chỉ/scroll)
         if (!this.view.renderer || !this.view.renderer.domElement) return;
-        
         const canvas = this.view.renderer.domElement;
         const rect = canvas.getBoundingClientRect();
-        
         const x = cx - rect.left;
         const y = cy - rect.top;
-        
         this.mouse.x = (x / rect.width) * 2 - 1;
         this.mouse.y = -(y / rect.height) * 2 + 1;
-        
         this.ray.setFromCamera(this.mouse, this.view.camera); 
     }
 
     listenMatchState() { 
-        onValue(ref(this.db, `matches/${this.matchId}/states/${this.opponentId}/hp`), (snap) => { 
-            const hp = snap.val(); 
-            if (hp !== null) { 
-                this.ehp = hp; 
-                this.view.updateUI(); 
-                if(this.ehp <= 0) this.endCombat(true); 
-            } 
+        // Lắng nghe trạng thái (HP và cờ finished) của tất cả người chơi
+        onValue(ref(this.db, `matches/${this.matchId}/states`), (snap) => {
+            const states = snap.val();
+            if (!states) return;
+
+            // Cập nhật HP địch
+            const oppState = states[this.opponentId];
+            if (oppState && oppState.hp !== undefined) {
+                this.ehp = oppState.hp;
+                this.view.updateUI();
+                if(this.ehp <= 0 && this.phase === 'combat') this.endCombat(true); 
+            }
+
+            // Logic đồng bộ kết thúc vòng
+            const myState = states[this.myId];
+            // Nếu cả 2 đều đã finished và mình đang ở trạng thái Waiting -> Vào vòng mới
+            if (this.isWaiting && myState?.finished && oppState?.finished) {
+                this.finalizeRound(this.pendingResult);
+            }
         }); 
     }
 
@@ -652,14 +668,11 @@ export class GameManager {
         if(e.target.closest('button') || e.target.closest('.card') || e.target.closest('#unit-inspector')) return;
         this.clickStart.x = e.clientX; this.clickStart.y = e.clientY; this.isDragging = false; 
         this.updateRay(e.clientX, e.clientY);
-        
         if (this.pillarGroup) {
             const pillarHits = this.ray.intersectObjects(this.pillarGroup.children, true);
             if (pillarHits.length > 0) { this.showAugmentInfo(); return; }
         }
-
         if(this.phase==='combat') return; 
-
         const hits = this.ray.intersectObjects(this.view.scene.children, true); 
         const hit = hits.find(h => h.object.name === 'hitbox' && h.object.userData.team === 'player');
         if(hit) { this.dragged = hit.object; this.dragGroup = hit.object.parent; this.dragGroup.position.y = 2; document.getElementById('sell-slot').classList.add('hover'); }
@@ -667,22 +680,14 @@ export class GameManager {
 
     onMove(e) {
         this.updateRay(e.clientX, e.clientY);
-        
-        if(this.dragItem !== null) {
-            this.updateGhostPos(e);
-            return;
-        }
-
+        if(this.dragItem !== null) { this.updateGhostPos(e); return; }
         if(this.dragged) {
             const moveDist = Math.abs(e.clientX - this.clickStart.x) + Math.abs(e.clientY - this.clickStart.y);
             if(moveDist > 5) this.isDragging = true;
-            
             const hits = this.ray.intersectObject(this.view.dragPlane); 
             if(hits.length) { this.dragGroup.position.x = hits[0].point.x; this.dragGroup.position.z = hits[0].point.z; }
-            
             const sell = document.getElementById('sell-slot'); const el = document.elementFromPoint(e.clientX, e.clientY);
             if(el && el.closest('#sell-slot')) sell.style.borderColor = 'white'; else sell.style.borderColor = '#e74c3c';
-            
             if(this.hoveredHex) { this.hoveredHex.material.emissive.setHex(0x000000); this.hoveredHex=null; }
             const hHits = this.ray.intersectObjects(this.hexes);
             if(hHits.length) { const h = hHits[0].object; if(h.userData.isPlayer) { this.hoveredHex = h; const ok = !h.userData.occupied || h===this.dragged.userData.hex; h.material.emissive.setHex(ok?0x00ff00:0xff0000); } }
@@ -691,15 +696,12 @@ export class GameManager {
 
     onUp(e) {
         this.view.hideTooltip();
-        
         if(this.dragItem !== null) {
             const ghost = document.getElementById('drag-ghost');
             if(ghost) ghost.classList.add('hidden');
-            
             this.updateRay(e.clientX, e.clientY);
             const hits = this.ray.intersectObjects(this.view.scene.children, true);
             const unitHit = hits.find(h => h.object.name === 'hitbox' && h.object.userData.team === 'player');
-            
             if(unitHit) {
                 const u = this.units.find(unit => unit.group === unitHit.object.parent);
                 if(u) {
@@ -708,15 +710,12 @@ export class GameManager {
                          this.inventory.splice(this.dragItem, 1);
                          this.view.renderInventory();
                          this.view.toast(`Đã trang bị: ${ITEMS[itemId].name}`);
-                    } else {
-                         this.view.toast("Tướng đã đầy đồ!");
-                    }
+                    } else { this.view.toast("Tướng đã đầy đồ!"); }
                 }
             }
             this.dragItem = null;
             return;
         }
-
         if (!this.isDragging) {
             if(e.target.closest('#unit-inspector') || e.target.closest('#sidebar-panel')) return;
             this.updateRay(e.clientX, e.clientY);
