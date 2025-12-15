@@ -1,3 +1,4 @@
+// logic.js
 import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS } from './shared.js';
 import { Unit, ViewManager } from './engine.js';
 import { UnitFactory } from './3d.js'; 
@@ -597,16 +598,22 @@ export class GameManager {
         });
     }
 
+    // --- CẬP NHẬT: LOGIC INPUT ĐÃ SỬA LỖI ---
     initInput() {
         const handler = (e) => this.handleInput(e);
         const opts = { passive: false }; 
         const canvas = this.view.renderer.domElement;
+        
+        // Mouse events
         canvas.addEventListener('mousedown', handler);
         window.addEventListener('mousemove', handler);
         window.addEventListener('mouseup', handler);
+        
+        // Touch events - Sửa: Bind move/end vào window để không mất focus khi trượt nhanh
         canvas.addEventListener('touchstart', handler, opts);
         window.addEventListener('touchmove', handler, opts);
         window.addEventListener('touchend', handler, opts);
+        
         const closeAug = document.getElementById('btn-close-aug');
         if(closeAug) closeAug.onclick = () => { document.getElementById('augment-modal').classList.add('hidden'); };
     }
@@ -622,11 +629,15 @@ export class GameManager {
             if (e.touches && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; } 
             else if (e.changedTouches && e.changedTouches.length > 0) { cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY; }
         } else { cx = e.clientX; cy = e.clientY; }
+        
         if (cx === undefined || isNaN(cx)) return;
+        
         const fakeEvent = { clientX: cx, clientY: cy, target: e.target };
+        
+        // FIX LỖI: Sử dụng e.type thay vì type
         if(e.type === 'mousedown' || e.type === 'touchstart') this.onDown(fakeEvent);
-        else if(e.type === 'mousemove' || type === 'touchmove') this.onMove(fakeEvent);
-        else if(e.type === 'mouseup' || type === 'touchend') this.onUp(fakeEvent);
+        else if(e.type === 'mousemove' || e.type === 'touchmove') this.onMove(fakeEvent);
+        else if(e.type === 'mouseup' || e.type === 'touchend') this.onUp(fakeEvent);
     }
 
     updateRay(cx, cy) { 
