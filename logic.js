@@ -1,4 +1,3 @@
-// logic.js
 import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS } from './shared.js';
 import { Unit, ViewManager } from './engine.js';
 import { UnitFactory } from './3d.js'; 
@@ -64,8 +63,8 @@ export class GameManager {
         this.timer = TIMERS.PREP; 
         this.lastTime = 0; 
         
-        // Trạng thái chờ đồng bộ PvP
         this.isWaiting = false;
+        this.isPvpLoading = false; 
         this.pendingResult = null;
 
         const components = Object.keys(ITEMS).filter(key => ITEMS[key].isComponent);
@@ -105,14 +104,14 @@ export class GameManager {
         const dt = (now - this.lastTime) / 1000; 
         this.lastTime = now;
 
-        if (this.isGameStarted && !this.isWaiting) {
+        if (this.isGameStarted && !this.isWaiting && !this.isPvpLoading) {
             this.updateTimer(dt);
+            this.units.forEach(u => u.update(now * 0.001, this.units)); 
         }
 
         this.view.updateCamera();
-        this.units.forEach(u => u.update(now * 0.001, this.units)); 
         
-        if(this.phase === 'combat' && !this.isWaiting) {
+        if(this.phase === 'combat' && !this.isWaiting && !this.isPvpLoading) {
             const playerLive = this.units.filter(u => u.team === 'player' && !u.isDead && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench).length;
             const enemyLive = this.units.filter(u => u.team === 'enemy' && !u.isDead).length;
             if (playerLive === 0) this.endCombat(false); 
@@ -277,11 +276,14 @@ export class GameManager {
         if(this.phase === 'combat') return;
         const active = this.units.filter(u=>u.team==='player' && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench);
         if(!active.length) { this.view.toast("Không có tướng! Tự động thua."); }
+        
         this.phase = 'combat';
         this.timer = TIMERS.COMBAT; 
         this.updateUIPhase(true); 
+        
         this.units.filter(u=>u.team==='enemy').forEach(u=>u.destroy()); 
         this.units = this.units.filter(u=>u.team==='player'); 
+        
         const roundKey = `${this.stage}-${this.subRound}`;
         if (PVE_ROUNDS[roundKey]) {
             this.spawnPveEnemies(PVE_ROUNDS[roundKey]);
@@ -311,14 +313,18 @@ export class GameManager {
 
     async spawnPvpOpponent(activeUnits) {
         if (this.mode === 'pvp') {
-            this.view.toast("PVP: Đang chờ đối thủ...");
+            this.isPvpLoading = true;
+            this.view.toast("Đang tải dữ liệu đối thủ...");
+            
             const myBoardData = this.serializeBoard(activeUnits);
             await update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), {
                 units: myBoardData,
                 ready: true
             });
+            
             const enemyRef = ref(this.db, `matches/${this.matchId}/boards/${this.opponentId}`);
             let found = false;
+            
             const onData = (snap) => {
                 const data = snap.val();
                 if (data && data.ready && !found) {
@@ -328,6 +334,7 @@ export class GameManager {
                 }
             };
             onValue(enemyRef, onData);
+            
             setTimeout(() => {
                 if (!found) {
                     found = true;
@@ -363,18 +370,16 @@ export class GameManager {
                 enemy.updateBar();
             }
         }
+        this.isPvpLoading = false; 
     }
 
-    // --- LOGIC KẾT THÚC VÒNG ĐẤU ĐÃ SỬA (SYNC PVP) ---
     endCombat(win) {
         if(win) { this.ehp-=10; this.view.toast("CHIẾN THẮNG!"); } 
         else { 
             this.php-=10; this.view.toast("THẤT BẠI!"); 
         }
 
-        // Logic cũ được tách ra:
         if (this.mode === 'pvp') {
-            // PvP: Bật cờ chờ, gửi kết quả lên server
             this.isWaiting = true;
             this.pendingResult = win;
             this.view.toast("Đang đợi đối thủ kết thúc...");
@@ -383,16 +388,13 @@ export class GameManager {
                 finished: true 
             });
         } else {
-            // PvE: Kết thúc ngay như bình thường
             this.finalizeRound(win);
         }
     }
 
-    // Hàm mới: Chỉ chạy khi cả 2 người chơi đều xong (hoặc PvE)
     finalizeRound(win) {
-        this.isWaiting = false; // Tắt trạng thái chờ
+        this.isWaiting = false; 
         
-        // Reset cờ finished trên server để chuẩn bị vòng sau
         if(this.mode === 'pvp') {
             update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { finished: false });
             update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), { ready: false });
@@ -477,6 +479,9 @@ export class GameManager {
     }
 
     triggerAugmentSelection() {
+        this.units.filter(u => u.team === 'enemy').forEach(u => u.destroy());
+        this.units = this.units.filter(u => u.team === 'player');
+        
         const modal = document.getElementById('augment-modal');
         const container = document.getElementById('augment-cards-container');
         const closeBtn = document.getElementById('btn-close-aug');
@@ -596,20 +601,18 @@ export class GameManager {
                 }
             }
         });
+        this.isPvpLoading = false; 
     }
 
-    // --- CẬP NHẬT: LOGIC INPUT ĐÃ SỬA LỖI ---
     initInput() {
         const handler = (e) => this.handleInput(e);
         const opts = { passive: false }; 
         const canvas = this.view.renderer.domElement;
         
-        // Mouse events
         canvas.addEventListener('mousedown', handler);
         window.addEventListener('mousemove', handler);
         window.addEventListener('mouseup', handler);
         
-        // Touch events - Sửa: Bind move/end vào window để không mất focus khi trượt nhanh
         canvas.addEventListener('touchstart', handler, opts);
         window.addEventListener('touchmove', handler, opts);
         window.addEventListener('touchend', handler, opts);
@@ -634,7 +637,6 @@ export class GameManager {
         
         const fakeEvent = { clientX: cx, clientY: cy, target: e.target };
         
-        // FIX LỖI: Sử dụng e.type thay vì type
         if(e.type === 'mousedown' || e.type === 'touchstart') this.onDown(fakeEvent);
         else if(e.type === 'mousemove' || e.type === 'touchmove') this.onMove(fakeEvent);
         else if(e.type === 'mouseup' || e.type === 'touchend') this.onUp(fakeEvent);
@@ -652,12 +654,10 @@ export class GameManager {
     }
 
     listenMatchState() { 
-        // Lắng nghe trạng thái (HP và cờ finished) của tất cả người chơi
         onValue(ref(this.db, `matches/${this.matchId}/states`), (snap) => {
             const states = snap.val();
             if (!states) return;
 
-            // Cập nhật HP địch
             const oppState = states[this.opponentId];
             if (oppState && oppState.hp !== undefined) {
                 this.ehp = oppState.hp;
@@ -665,9 +665,7 @@ export class GameManager {
                 if(this.ehp <= 0 && this.phase === 'combat') this.endCombat(true); 
             }
 
-            // Logic đồng bộ kết thúc vòng
             const myState = states[this.myId];
-            // Nếu cả 2 đều đã finished và mình đang ở trạng thái Waiting -> Vào vòng mới
             if (this.isWaiting && myState?.finished && oppState?.finished) {
                 this.finalizeRound(this.pendingResult);
             }
