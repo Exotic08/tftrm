@@ -20,7 +20,6 @@ const db = getDatabase(app);
 // 2. Quản lý User
 let currentUserId = localStorage.getItem('tft_uid');
 let currentUserName = "Kỳ Thủ Mới";
-// Mặc định settings
 let userSettings = { uiScale: 1, zoomIdx: 1 }; 
 
 if (!currentUserId) {
@@ -28,171 +27,171 @@ if (!currentUserId) {
     localStorage.setItem('tft_uid', currentUserId);
 }
 
-// DOM Elements
-const lobbyScreen = document.getElementById('lobby-screen');
-const nameDisplay = document.getElementById('lobby-username');
-const nameInputModal = document.getElementById('name-input-modal');
-const nameInput = document.getElementById('input-player-name');
-const modeSelectModal = document.getElementById('mode-select-modal');
-const btnPvp = document.getElementById('btn-mode-pvp');
-
-// 3. Hàm Load dữ liệu
-async function loadUserData() {
-    const dbRef = ref(db);
-    try {
-        const snapshot = await get(child(dbRef, `users/${currentUserId}`));
-        if (snapshot.exists()) {
-            const data = snapshot.val();
-            currentUserName = data.name || "Kỳ Thủ Mới";
-            // Load settings nếu có
-            if (data.settings) {
-                userSettings = data.settings;
-            }
-            updateNameDisplay();
-        } else {
-            showNameModal();
-        }
-    } catch (error) {
-        console.error("Lỗi lấy data:", error);
-        if (error.code === 'PERMISSION_DENIED') {
-            alert("Lỗi quyền truy cập Firebase!");
-        }
-        showNameModal(); 
-    }
-}
-
-function updateNameDisplay() {
-    if(nameDisplay) nameDisplay.innerText = currentUserName;
-}
-
-// Lưu tên
-function saveName(newName) {
-    if (!newName.trim()) return;
-    currentUserName = newName;
-    updateNameDisplay();
-    hideNameModal();
-
-    update(ref(db, 'users/' + currentUserId), {
-        name: newName,
-        lastLogin: Date.now()
-    }).catch(err => console.error(err));
-}
-
-// --- MỚI: HÀM LƯU SETTINGS ---
+// Hàm lưu settings (để logic.js gọi)
 window.saveUserSettings = (newSettings) => {
-    // Merge setting mới vào setting cũ
     userSettings = { ...userSettings, ...newSettings };
-    // Update local variable for consistency
-    window.userSettings = userSettings;
-    
-    update(ref(db, 'users/' + currentUserId + '/settings'), userSettings)
-        .catch(err => console.error("Lỗi lưu settings:", err));
+    localStorage.setItem('tft_settings', JSON.stringify(userSettings));
 };
 
-// Export settings để logic.js dùng
-window.userSettings = userSettings;
-
-// 4. UI Logic
-function showNameModal() {
-    if(nameInputModal) {
-        nameInputModal.classList.remove('hidden');
-        if(nameInput) nameInput.value = currentUserName;
-    }
-}
-function hideNameModal() {
-    if(nameInputModal) nameInputModal.classList.add('hidden');
-}
-
-// --- LOGIC PVP MATCHMAKING ---
-let matchingListener = null;
-
-async function findMatch() {
-    const queueRef = ref(db, 'queue');
-    const btnText = btnPvp.querySelector('h3');
-    if(btnText) btnText.innerText = "Đang tìm...";
+// Hàm tải dữ liệu người dùng
+function loadUserData() {
+    const storedName = localStorage.getItem('tft_username');
+    if (storedName) currentUserName = storedName;
     
-    // 1. Kiểm tra xem có ai trong hàng chờ không
-    const snapshot = await get(queueRef);
-    let opponentFound = null;
-
-    if (snapshot.exists()) {
-        const queueData = snapshot.val();
-        // Tìm người khác mình
-        const opponentKey = Object.keys(queueData).find(k => k !== currentUserId);
-        if (opponentKey) {
-            opponentFound = opponentKey;
-        }
+    const storedSettings = localStorage.getItem('tft_settings');
+    if (storedSettings) {
+        try { userSettings = JSON.parse(storedSettings); } catch(e){}
     }
+    
+    document.getElementById('lobby-username').innerText = currentUserName;
+    document.getElementById('input-player-name').value = currentUserName;
 
-    if (opponentFound) {
-        // 2. FOUND: Tạo trận đấu
-        const matchId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-        const opponentId = opponentFound;
-        
-        // Xóa opponent khỏi queue để không ai khác bắt được
-        await remove(ref(db, `queue/${opponentId}`));
-
-        // Tạo dữ liệu trận đấu
-        const matchData = {
-            host: currentUserId,
-            guest: opponentId,
-            status: 'prep',
-            stage: 1,
-            subRound: 1,
-            lastUpdate: Date.now()
-        };
-        
-        await set(ref(db, `matches/${matchId}`), matchData);
-
-        // Thông báo cho opponent (qua user node)
-        update(ref(db, `users/${opponentId}`), { currentMatch: matchId });
-
-        // Mình vào game ngay (Role: Host)
-        enterGame({ mode: 'pvp', matchId: matchId, role: 'host', opponentId: opponentId });
-        
-    } else {
-        // 3. NOT FOUND: Tự thêm mình vào queue
-        const myQueueRef = ref(db, `queue/${currentUserId}`);
-        await set(myQueueRef, {
-            name: currentUserName || "Unknown",
-            time: Date.now()
-        });
-        
-        // Xóa khỏi queue khi disconnect (tránh rác)
-        onDisconnect(myQueueRef).remove();
-
-        // Lắng nghe xem có ai mời vào trận không
-        const myUserRef = ref(db, `users/${currentUserId}/currentMatch`);
-        matchingListener = onValue(myUserRef, (snap) => {
-            const matchId = snap.val();
-            if (matchId) {
-                // Opponent đã tạo phòng -> Mình vào
-                remove(myQueueRef); // Xóa mình khỏi queue
-                update(ref(db, `users/${currentUserId}`), { currentMatch: null }); // Reset trigger
-                
-                // Lấy thông tin trận để biết opponent là ai (Host)
-                get(ref(db, `matches/${matchId}`)).then(mSnap => {
-                    const mData = mSnap.val();
-                    const opponentId = mData.host;
-                    enterGame({ mode: 'pvp', matchId: matchId, role: 'guest', opponentId: opponentId });
-                });
-            }
-        });
+    // Apply settings UI ngay lập tức nếu cần
+    if (userSettings.uiScale) {
+        document.documentElement.style.setProperty('--ui-scale', userSettings.uiScale);
     }
 }
 
-// 5. Vào Game (Cập nhật để nhận config)
-function enterGame(gameConfig = { mode: 'pve' }) {
-    if(matchingListener) {
-        matchingListener(); // Tắt listener tìm trận
-        matchingListener = null;
-    }
+// 3. Logic Ghép Trận (Matchmaking)
+const MATCH_TIMEOUT = 30000; // 30s
+let isSearching = false;
+let searchInterval = null;
 
-    if(lobbyScreen) lobbyScreen.classList.add('fade-out');
+function showNameModal() {
+    document.getElementById('name-input-modal').classList.remove('hidden');
+}
+
+function saveName(name) {
+    if (!name || name.trim().length === 0) return;
+    currentUserName = name.trim();
+    localStorage.setItem('tft_username', currentUserName);
+    document.getElementById('lobby-username').innerText = currentUserName;
+    document.getElementById('name-input-modal').classList.add('hidden');
+}
+
+function findMatch() {
+    if(isSearching) return;
+    isSearching = true;
+    
+    const btnPvp = document.getElementById('btn-mode-pvp');
+    const originalText = btnPvp.innerHTML;
+    btnPvp.innerHTML = '<div class="mode-icon">⏳</div><h3>Đang Tìm...</h3>';
+    btnPvp.classList.add('disabled');
+
+    const queueRef = ref(db, 'queue');
+    const matchRef = ref(db, 'matches');
+
+    // Thêm mình vào hàng chờ
+    const myEntry = { id: currentUserId, name: currentUserName, time: Date.now() };
+    set(child(queueRef, currentUserId), myEntry);
+    onDisconnect(child(queueRef, currentUserId)).remove();
+
+    let checkCount = 0;
+    searchInterval = setInterval(async () => {
+        checkCount++;
+        if(checkCount > 10) { // Timeout sau 10 lần check (khoảng 20s)
+            stopSearching(originalText, "Không tìm thấy đối thủ!");
+            return;
+        }
+
+        const snapshot = await get(queueRef);
+        const queue = snapshot.val();
+        
+        if (queue) {
+            const keys = Object.keys(queue);
+            // Nếu có người khác trong hàng chờ (không phải mình)
+            const opponentKey = keys.find(k => k !== currentUserId);
+            
+            if (opponentKey) {
+                // TÌM THẤY!
+                const opponent = queue[opponentKey];
+                
+                // Xóa cả 2 khỏi queue để tránh người khác ghép trùng
+                await remove(child(queueRef, currentUserId));
+                await remove(child(queueRef, opponentKey));
+                
+                createMatch(currentUserId, opponentKey, opponent.name);
+                clearInterval(searchInterval);
+            }
+        }
+    }, 2000);
+}
+
+function stopSearching(origText, msg) {
+    clearInterval(searchInterval);
+    isSearching = false;
+    const btnPvp = document.getElementById('btn-mode-pvp');
+    if(btnPvp) {
+        btnPvp.innerHTML = origText;
+        btnPvp.classList.remove('disabled');
+    }
+    remove(ref(db, `queue/${currentUserId}`));
+    if(msg) alert(msg);
+}
+
+async function createMatch(hostId, guestId, guestName) {
+    const matchId = `match_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+    
+    const matchData = {
+        host: hostId,
+        guest: guestId,
+        hostName: currentUserName,
+        guestName: guestName,
+        status: 'active',
+        created: Date.now()
+    };
+    
+    // Tạo match mới
+    await set(ref(db, `matches/${matchId}`), matchData);
+    
+    // Gửi tín hiệu mời cho Guest (thông qua user-match-mapping hoặc listen queue cũ - ở đây làm đơn giản là Host tự vào, Guest listen ở đâu đó?)
+    // Cách đơn giản: Host tự tạo record 'invite' cho Guest
+    // Tuy nhiên để đơn giản hoá project này: Ta sẽ dùng cơ chế 'signal'
+    // Hoặc Host update trạng thái 'matched' vào queue của Guest (phức tạp).
+    
+    // CÁCH TỐI ƯU CHO DEMO:
+    // Host set matchId vào node 'active_games' cho cả 2 user
+    update(ref(db, `users/${hostId}`), { currentMatch: matchId, role: 'host' });
+    update(ref(db, `users/${guestId}`), { currentMatch: matchId, role: 'guest' });
+
+    enterGame({ mode: 'pvp', matchId: matchId, role: 'host', opponentId: guestId, db: db });
+}
+
+// Lắng nghe xem mình có được ghép trận không (Dành cho người đến sau - Guest)
+function listenForMatch() {
+    const userRef = ref(db, `users/${currentUserId}`);
+    onValue(userRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data && data.currentMatch) {
+            // Đã được ghép!
+            // Xóa info để tránh trigger lại lần sau
+            update(userRef, { currentMatch: null });
+            
+            // Vào game
+            enterGame({ 
+                mode: 'pvp', 
+                matchId: data.currentMatch, 
+                role: data.role, 
+                opponentId: 'unknown', // Guest sẽ lấy ID đối thủ từ match info sau
+                db: db 
+            });
+        }
+    });
+}
+// Kích hoạt lắng nghe ngay khi vào lobby
+listenForMatch();
+
+
+function enterGame(gameConfig) {
+    const lobby = document.getElementById('lobby-screen');
+    const gameUI = document.getElementById('game-ui');
+    
+    lobby.classList.add('fade-out');
     setTimeout(() => {
-        if(lobbyScreen) lobbyScreen.classList.add('hidden');
-        const gui = document.getElementById('game-ui');
-        if(gui) gui.classList.remove('hidden');
+        lobby.classList.add('hidden');
+        gameUI.classList.remove('hidden');
+        
+        // Hiện nút bán khi vào game
         const sell = document.getElementById('sell-slot');
         if(sell) sell.classList.remove('hidden');
         
@@ -214,13 +213,31 @@ function enterGame(gameConfig = { mode: 'pve' }) {
 document.addEventListener('DOMContentLoaded', () => {
     loadUserData();
 
+    // --- CẬP NHẬT: LOGIC NÚT GLOBAL FULLSCREEN ---
+    // Vì nút này nằm ngoài lobby, ta gán sự kiện ngay tại đây để dùng được luôn
+    const btnFs = document.getElementById('btn-global-fullscreen');
+    if (btnFs) {
+        btnFs.onclick = () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error: ${err.message}`);
+                });
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+            }
+        };
+    }
+    // ---------------------------------------------
+
     const profileBox = document.getElementById('user-profile-box');
+    const nameInput = document.getElementById('input-player-name');
     if(profileBox) profileBox.onclick = () => showNameModal();
 
     const btnConfirm = document.getElementById('btn-confirm-name');
     if(btnConfirm) btnConfirm.onclick = () => saveName(nameInput.value);
 
     const btnPlay = document.getElementById('btn-lobby-play');
+    const modeSelectModal = document.getElementById('mode-select-modal');
     if(btnPlay) btnPlay.onclick = () => {
         if(modeSelectModal) modeSelectModal.classList.remove('hidden');
     };
@@ -235,6 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(btnPve) btnPve.onclick = () => enterGame({ mode: 'pve' });
 
     // Enable nút PvP
+    const btnPvp = document.getElementById('btn-mode-pvp');
     if(btnPvp) {
         btnPvp.classList.remove('disabled');
         btnPvp.onclick = () => findMatch();

@@ -49,6 +49,7 @@ export class GameManager {
     constructor(settings) {
         this.settings = settings || {};
         this.mode = this.settings.mode || 'pve'; 
+        this.role = this.settings.role || 'host'; 
         this.db = this.settings.db;
         this.matchId = this.settings.matchId;
         this.myId = this.settings.myId;
@@ -57,6 +58,9 @@ export class GameManager {
         this.units = []; this.hexes = []; this.interestOrbs = [];
         this.vfxList = []; this.projList = [];
         this.isGameStarted = false;
+        
+        this.netUnits = {}; 
+        this.syncTimer = 0;
         
         this.gold = 4; this.lvl = 1; this.xp = 0; this.php = 100; this.ehp = 100; 
         this.stage = 1; this.subRound = 1; this.phase = 'prep';
@@ -90,7 +94,7 @@ export class GameManager {
             
             if(this.mode === 'pvp') {
                 this.listenMatchState();
-                this.view.toast("PVP MODE CONNECTED!");
+                this.view.toast(this.role === 'host' ? "PVP MODE (HOST)" : "PVP MODE (SPECTATOR)");
             }
 
             this.lastTime = performance.now();
@@ -105,17 +109,29 @@ export class GameManager {
         this.lastTime = now;
 
         if (this.isGameStarted && !this.isWaiting && !this.isPvpLoading) {
-            this.updateTimer(dt);
-            this.units.forEach(u => u.update(now * 0.001, this.units)); 
+            if (this.mode === 'pve' || this.role === 'host') {
+                this.updateTimer(dt);
+            }
+            
+            if (this.phase === 'combat' && this.mode === 'pvp' && this.role === 'guest') {
+                if (this.updateGuestVisuals) this.updateGuestVisuals(dt);
+            } else {
+                this.units.forEach(u => u.update(now * 0.001, this.units));
+                if (this.phase === 'combat' && this.mode === 'pvp' && this.role === 'host') {
+                    if (this.syncHostToGuest) this.syncHostToGuest(dt);
+                }
+            }
         }
 
         this.view.updateCamera();
         
         if(this.phase === 'combat' && !this.isWaiting && !this.isPvpLoading) {
-            const playerLive = this.units.filter(u => u.team === 'player' && !u.isDead && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench).length;
-            const enemyLive = this.units.filter(u => u.team === 'enemy' && !u.isDead).length;
-            if (playerLive === 0) this.endCombat(false); 
-            else if (enemyLive === 0) this.endCombat(true); 
+            if (this.mode === 'pve' || this.role === 'host') {
+                const playerLive = this.units.filter(u => u.team === 'player' && !u.isDead && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench).length;
+                const enemyLive = this.units.filter(u => u.team === 'enemy' && !u.isDead).length;
+                if (playerLive === 0) this.endCombat(false); 
+                else if (enemyLive === 0) this.endCombat(true); 
+            }
         }
 
         for(let i=this.vfxList.length-1; i>=0; i--) { if(!this.vfxList[i].update()) { this.vfxList.splice(i, 1); } }
@@ -231,6 +247,8 @@ export class GameManager {
             }
             unit.destroy();
             this.units = this.units.filter(u => u !== unit);
+            if(unit.netId && this.netUnits[unit.netId]) delete this.netUnits[unit.netId];
+            
             this.view.toast(`Bán +${refund}g`);
             this.calcSyn();
             this.view.updateUI();
@@ -246,6 +264,9 @@ export class GameManager {
             const u3 = sameUnits[2];
             const targetHex = u3.group.children.find(c=>c.name==='hitbox').userData.hex;
             const collectedItems = [...u1.items, ...u2.items, ...u3.items].slice(0, 3); 
+            
+            [u1, u2, u3].forEach(u => { if(u.netId) delete this.netUnits[u.netId]; });
+
             u1.destroy(); u2.destroy(); u3.destroy();
             this.units = this.units.filter(u => u !== u1 && u !== u2 && u !== u3);
             const newUnit = this.createUnit(unit.data, targetHex, 'player');
@@ -258,7 +279,6 @@ export class GameManager {
             this.checkTriple(newUnit);
         }
     }
-    
     handleItemStart(e, index, el) {
         e.stopPropagation();
         this.dragItem = index;
@@ -281,6 +301,15 @@ export class GameManager {
         this.timer = TIMERS.COMBAT; 
         this.updateUIPhase(true); 
         
+        this.netUnits = {};
+
+        const prefix = (this.mode === 'pvp' && this.role === 'host') ? 'h_' : 'g_';
+        
+        active.forEach((u, i) => {
+            u.netId = `${prefix}${i}`;
+            this.netUnits[u.netId] = u;
+        });
+
         this.units.filter(u=>u.team==='enemy').forEach(u=>u.destroy()); 
         this.units = this.units.filter(u=>u.team==='player'); 
         
@@ -373,7 +402,78 @@ export class GameManager {
         this.isPvpLoading = false; 
     }
 
+    syncHostToGuest(dt) {
+        this.syncTimer += dt;
+        if (this.syncTimer < 0.05) return;
+        this.syncTimer = 0;
+
+        const syncData = {};
+        this.units.forEach(u => {
+            if (!u.netId) return;
+            syncData[u.netId] = {
+                x: Number(u.group.position.x.toFixed(2)),
+                z: Number(u.group.position.z.toFixed(2)),
+                r: Number(u.group.rotation.y.toFixed(2)),
+                hp: Math.ceil(u.hp),
+                m: Math.ceil(u.mana)
+            };
+        });
+
+        update(ref(this.db, `matches/${this.matchId}/sync`), syncData);
+    }
+
+    listenToCombatSync() {
+        if (this.role !== 'guest') return;
+        
+        this.syncListener = onValue(ref(this.db, `matches/${this.matchId}/sync`), (snap) => {
+            const data = snap.val();
+            if (!data) return;
+
+            Object.keys(data).forEach(netId => {
+                const u = this.netUnits[netId];
+                if (u) {
+                    u.targetSync = data[netId];
+                    u.hp = data[netId].hp;
+                    u.mana = data[netId].m;
+                    u.updateBar();
+                    
+                    if (u.hp <= 0 && !u.isDead) {
+                        u.isDead = true;
+                        u.group.visible = false;
+                        u.bar.style.display = 'none';
+                    }
+                }
+            });
+        });
+    }
+
+    updateGuestVisuals(dt) {
+        this.units.forEach(u => {
+            if (u.targetSync) {
+                let tx = u.targetSync.x;
+                let tz = u.targetSync.z;
+                let tr = u.targetSync.r;
+
+                tx = -tx; 
+                tz = -tz; 
+                tr = tr + Math.PI;
+
+                u.group.position.x += (tx - u.group.position.x) * 15 * dt;
+                u.group.position.z += (tz - u.group.position.z) * 15 * dt;
+                
+                u.group.rotation.y = tr;
+                
+                u.updateAnimation(performance.now() * 0.001); 
+            }
+        });
+    }
+
     endCombat(win) {
+        if (this.syncListener) {
+            this.syncListener();
+            this.syncListener = null;
+        }
+
         if(win) { this.ehp-=10; this.view.toast("CHIẾN THẮNG!"); } 
         else { 
             this.php-=10; this.view.toast("THẤT BẠI!"); 
@@ -382,7 +482,15 @@ export class GameManager {
         if (this.mode === 'pvp') {
             this.isWaiting = true;
             this.pendingResult = win;
-            this.view.toast("Đang đợi đối thủ kết thúc...");
+            
+            if (this.role === 'host') {
+                update(ref(this.db, `matches/${this.matchId}/result`), {
+                    winner: win ? this.myId : this.opponentId,
+                    timestamp: Date.now()
+                });
+            }
+
+            this.view.toast("Đang đồng bộ kết quả...");
             update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { 
                 hp: this.php,
                 finished: true 
@@ -398,6 +506,9 @@ export class GameManager {
         if(this.mode === 'pvp') {
             update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { finished: false });
             update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), { ready: false });
+            if(this.role === 'host') {
+                update(ref(this.db, `matches/${this.matchId}/sync`), null);
+            }
         }
 
         if(this.php<=0 || this.ehp<=0) { 
@@ -482,7 +593,6 @@ export class GameManager {
         this.units.filter(u => u.team === 'enemy').forEach(u => u.destroy());
         this.units = this.units.filter(u => u.team === 'player');
         
-        // --- SỬA LỖI: Buộc thoát khỏi trạng thái chờ khi chọn lõi ---
         this.isWaiting = false;
         
         const modal = document.getElementById('augment-modal');
@@ -591,20 +701,31 @@ export class GameManager {
     
     spawnEnemyFromData(unitsData) {
         if(!unitsData) return;
-        this.view.toast("PVP START!");
-        unitsData.forEach(ud => {
+        this.view.toast(this.role === 'host' ? "PVP START (HOST)" : "PVP START (SPECTATING)");
+        
+        const prefix = (this.mode === 'pvp' && this.role === 'host') ? 'g_' : 'h_';
+
+        unitsData.forEach((ud, i) => {
             const champData = CHAMPS.find(c => c.id === ud.id);
             if (champData) {
                 const mirrorIdx = 55 - ud.hexIdx;
                 const spawnHex = this.hexes[mirrorIdx];
                 if (spawnHex) {
                     const enemy = this.createUnit(champData, spawnHex, 'enemy');
-                    enemy.star = 1; for(let i=1; i<ud.star; i++) enemy.upgradeStar();
+                    enemy.star = 1; for(let s=1; s<ud.star; s++) enemy.upgradeStar();
                     enemy.items = ud.items || []; enemy.updateStats();
+                    
+                    enemy.netId = `${prefix}${i}`;
+                    this.netUnits[enemy.netId] = enemy;
                 }
             }
         });
+        
         this.isPvpLoading = false; 
+        
+        if (this.role === 'guest') {
+            this.listenToCombatSync();
+        }
     }
 
     initInput() {
@@ -621,7 +742,17 @@ export class GameManager {
         window.addEventListener('touchend', handler, opts);
         
         const closeAug = document.getElementById('btn-close-aug');
-        if(closeAug) closeAug.onclick = () => { document.getElementById('augment-modal').classList.add('hidden'); };
+        const augModal = document.getElementById('augment-modal');
+        
+        if(closeAug) closeAug.onclick = () => { augModal.classList.add('hidden'); };
+
+        if (augModal) {
+            augModal.addEventListener('mousedown', (e) => {
+                if (e.target === augModal && !closeAug.classList.contains('hidden')) {
+                    augModal.classList.add('hidden');
+                }
+            });
+        }
     }
     
     handleInput(e) {
@@ -665,12 +796,19 @@ export class GameManager {
             if (oppState && oppState.hp !== undefined) {
                 this.ehp = oppState.hp;
                 this.view.updateUI();
-                if(this.ehp <= 0 && this.phase === 'combat') this.endCombat(true); 
             }
+            
+            const resultRef = ref(this.db, `matches/${this.matchId}/result`);
+            get(resultRef).then(resSnap => {
+                 const res = resSnap.val();
+                 if (res && this.isWaiting) {
+                     const amIWinner = res.winner === this.myId;
+                     this.finalizeRound(amIWinner);
+                 }
+            });
 
             const myState = states[this.myId];
             if (this.isWaiting && myState?.finished && oppState?.finished) {
-                this.finalizeRound(this.pendingResult);
             }
         }); 
     }

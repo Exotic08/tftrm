@@ -14,7 +14,9 @@ export class Unit {
         this.maxMana = 100; 
         this.items = [];
         this.bar = document.createElement('div'); 
+        
         this.bar.className = `bar-wrap ${team} star-1`;
+        
         this.bar.innerHTML = `<div class="item-badge-container"></div><div class="bar-hp"><div class="bar-fill"></div></div><div class="bar-mana"><div class="mana-fill"></div></div>`;
         const worldUI = document.getElementById('world-ui');
         if(worldUI) worldUI.appendChild(this.bar);
@@ -33,6 +35,9 @@ export class Unit {
         this.animState = 'idle'; 
         this.atkAnimTimer = 0;
         this.moveAnimTimer = 0;
+        
+        this.targetSync = null; 
+
         this.updateStats(); 
         this.updateBar(); 
         this.updateBarPos();
@@ -48,6 +53,7 @@ export class Unit {
         this.stunTime = 0;
         this.group.visible = true; 
         this.target = null;
+        this.targetSync = null;
         this.visuals.forEach(mesh => {
             mesh.position.copy(mesh.userData.basePos);
             mesh.rotation.copy(mesh.userData.baseRot);
@@ -160,6 +166,12 @@ export class Unit {
 
     update(t, units) {
         if(this.isDead) { this.bar.style.display='none'; return; }
+        
+        if (this.gm.mode === 'pvp' && this.gm.role === 'guest' && this.gm.phase === 'combat') {
+             this.updateBarPos(); 
+             return;
+        }
+
         this.updateAnimation(t); 
         if(this.stunTime > 0) { 
             this.stunTime -= 0.016; 
@@ -384,6 +396,17 @@ export class ViewManager {
     initUIListeners() {
         const get = (id) => document.getElementById(id);
         const bind = (id, event, handler) => { const el = get(id); if (el) el[event] = handler; };
+
+        // --- CẬP NHẬT: Logic nút Fullscreen ---
+        bind('btn-fullscreen', 'onclick', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+            }
+        });
 
         bind('btn-lobby-play', 'onclick', () => { });
         bind('btn-refresh', 'onclick', () => { if(this.gm.gold>=2){this.gm.gold-=2; this.gm.refreshShop(); this.updateUI();} });
