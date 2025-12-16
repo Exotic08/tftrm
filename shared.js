@@ -1,5 +1,47 @@
 // shared.js
-// CẬP NHẬT: THÊM CẤU HÌNH THỜI GIAN ROUND ĐẤU
+// CẬP NHẬT: THÊM CLASS SeededRNG ĐỂ ĐỒNG BỘ RANDOM
+
+// ==========================================
+// PHẦN 0: TIỆN ÍCH RNG (RANDOM NUMBER GENERATOR)
+// ==========================================
+
+export class SeededRNG {
+    constructor(seed) {
+        // Nếu seed là chuỗi, băm nó thành số
+        if (typeof seed === 'string') {
+            this.seed = this.hashString(seed);
+        } else {
+            this.seed = seed >>> 0;
+        }
+    }
+
+    // Hàm băm chuỗi thành số nguyên 32-bit (Cyrb53 biến thể đơn giản)
+    hashString(str) {
+        let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+        for (let i = 0, ch; i < str.length; i++) {
+            ch = str.charCodeAt(i);
+            h1 = Math.imul(h1 ^ ch, 2654435761);
+            h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+    }
+
+    // Thuật toán Mulberry32: Tạo số ngẫu nhiên từ seed
+    // Trả về số thực trong khoảng [0, 1) giống Math.random()
+    next() {
+        this.seed = (this.seed + 0x6D2B79F5) | 0;
+        let t = Math.imul(this.seed ^ (this.seed >>> 15), 1 | this.seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+
+    // Tiện ích: Random số nguyên trong khoảng [min, max]
+    range(min, max) {
+        return Math.floor(this.next() * (max - min + 1)) + min;
+    }
+}
 
 // ==========================================
 // PHẦN 1: DATA & CONFIG
@@ -52,38 +94,38 @@ export const MONSTERS = {
 };
 
 export const STATS = {
-    'garen':  { hp: 650, dmg: 55, range: 1, as: 0.60, type: 'melee', skill: 'spin', armor: 35, skillInfo: { name: "Phán Quyết", desc: "Xoay kiếm trong 3s, gây sát thương vật lý liên tục lên kẻ địch lân cận." } },
-    'darius': { hp: 700, dmg: 60, range: 1, as: 0.55, type: 'melee', skill: 'guillotine', armor: 35, skillInfo: { name: "Máy Chém Noxus", desc: "Bổ rìu gây sát thương lớn và hồi máu cho bản thân." } },
-    'vi':     { hp: 750, dmg: 70, range: 1, as: 0.65, type: 'melee', skill: 'uppercut', armor: 40, skillInfo: { name: "Tả Xung Hữu Đột", desc: "Đấm xuyên mục tiêu, gây sát thương và làm choáng 1.5s." } },
-    'riven':  { hp: 850, dmg: 80, range: 1, as: 0.70, type: 'melee', skill: 'wind_slash', armor: 40, skillInfo: { name: "Chém Gió", desc: "Phóng sóng năng lượng gây sát thương diện rộng phía trước." } },
-    'yasuo':  { hp: 950, dmg: 95, range: 1, as: 0.80, type: 'melee', skill: 'tornado', armor: 35, skillInfo: { name: "Trăn Trối", desc: "Phóng lốc xoáy hất tung và gây sát thương lên kẻ địch." } },
-    'poppy':  { hp: 700, dmg: 45, range: 1, as: 0.55, type: 'melee', skill: 'hammer_smash', armor: 50, skillInfo: { name: "Sứ Giả Phán Quyết", desc: "Dậm búa gây sát thương và làm choáng mục tiêu 2s." } },
-    'malph':  { hp: 750, dmg: 50, range: 1, as: 0.50, type: 'melee', skill: 'ground_slam', armor: 55, skillInfo: { name: "Dậm Đất", desc: "Dậm mạnh xuống đất gây sát thương diện rộng." } },
-    'fiora':  { hp: 600, dmg: 50, range: 1, as: 0.80, type: 'melee', skill: 'grand_challenge', armor: 35, skillInfo: { name: "Phản Đòn", desc: "Chặn sát thương, sau đó đâm trả gây choáng và hồi máu." } },
-    'leo':    { hp: 900, dmg: 45, range: 1, as: 0.50, type: 'melee', skill: 'solar_flare', armor: 60, skillInfo: { name: "Thái Dương Hạ San", desc: "Gọi cột sáng làm choáng kẻ địch ở trung tâm vụ nổ." } },
-    'braum':  { hp: 1150,dmg: 55, range: 1, as: 0.45, type: 'melee', skill: 'ice_fissure', armor: 70, skillInfo: { name: "Băng Địa Chấn", desc: "Tạo khe nứt băng giá hất tung kẻ địch theo đường thẳng." } },
-    'vayne':  { hp: 500, dmg: 65, range: 5, as: 0.75, type: 'range', projColor: 0xaaaaaa, skill: 'silver_bolts', armor: 20, skillInfo: { name: "Mũi Tên Bạc", desc: "Mỗi đòn đánh thứ 3 gây thêm sát thương chuẩn." } },
-    'cait':   { hp: 550, dmg: 60, range: 8, as: 0.65, type: 'range', projColor: 0x00ff00, skill: 'ace_shot', armor: 20, skillInfo: { name: "Bách Phát Bách Trúng", desc: "Ngắm bắn gây sát thương cực lớn cho kẻ địch xa nhất." } },
-    'varus':  { hp: 600, dmg: 75, range: 6, as: 0.70, type: 'range', projColor: 0xaa00aa, skill: 'corruption', armor: 25, skillInfo: { name: "Sợi Xích Tội Lỗi", desc: "Bắn ra dây xích trói chân và gây sát thương phép." } },
-    'ashe':   { hp: 550, dmg: 70, range: 6, as: 0.75, type: 'range', projColor: 0x00ffff, skill: 'crystal_arrow', armor: 20, skillInfo: { name: "Đại Băng Tiễn", desc: "Bắn mũi tên băng khổng lồ làm choáng mục tiêu." } },
-    'jhin':   { hp: 650, dmg: 160,range: 7, as: 0.50, type: 'range', projColor: 0xff0000, skill: 'curtain_call', armor: 25, skillInfo: { name: "Sân Khấu Tử Thần", desc: "Viên đạn thứ 4 chắc chắn chí mạng với sát thương khủng." } },
-    'ziggs':  { hp: 480, dmg: 45, range: 4, as: 0.65, type: 'range', projColor: 0xe056fd, skill: 'bouncing_bomb', armor: 20, skillInfo: { name: "Bom Nảy", desc: "Ném bom gây sát thương phép lan cho mục tiêu và kẻ địch cạnh bên." } },
-    'tf':     { hp: 520, dmg: 50, range: 4, as: 0.70, type: 'range', projColor: 0xffff00, skill: 'wild_cards', armor: 20, skillInfo: { name: "Phi Bài", desc: "Phi 3 lá bài theo hình nón gây sát thương phép." } },
-    'annie':  { hp: 650, dmg: 55, range: 3, as: 0.60, type: 'range', projColor: 0xd35400, skill: 'disintegrate', armor: 35, skillInfo: { name: "Khiên Lửa", desc: "Tạo khiên bảo vệ bản thân và thiêu đốt kẻ địch xung quanh." } },
-    'lux':    { hp: 580, dmg: 60, range: 7, as: 0.70, type: 'range', projColor: 0xffffff, skill: 'final_spark', armor: 25, skillInfo: { name: "Cầu Vồng Tối Thượng", desc: "Bắn dải sáng xuyên thấu gây sát thương phép cực mạnh." } },
-    'velkoz': { hp: 700, dmg: 75, range: 5, as: 0.65, type: 'range', projColor: 0x8e44ad, skill: 'life_form_ray', armor: 30, skillInfo: { name: "Tia Phân Hủy", desc: "Bắn tia laser gây sát thương phép liên tục theo thời gian." } },
-    'khazix': { hp: 550, dmg: 60, range: 1, as: 0.75, type: 'melee', skill: 'taste_fear', armor: 25, skillInfo: { name: "Nếm Mùi Sợ Hãi", desc: "Gây sát thương vật lý. x2 Sát thương nếu mục tiêu bị cô lập." } },
-    'noc':    { hp: 600, dmg: 65, range: 1, as: 0.80, type: 'melee', skill: 'umbra_blades', armor: 30, skillInfo: { name: "Lưỡi Dao Bóng Tối", desc: "Xoay người gây sát thương diện rộng và hồi máu." } },
-    'zed':    { hp: 650, dmg: 75, range: 1, as: 0.85, type: 'melee', skill: 'razor_shuriken', armor: 30, skillInfo: { name: "Phi Tiêu Sắc Lẻm", desc: "Ném phi tiêu xuyên thấu gây sát thương vật lý." } },
-    'kat':    { hp: 700, dmg: 70, range: 1, as: 0.80, type: 'melee', skill: 'death_lotus', armor: 30, skillInfo: { name: "Bông Sen Tử Thần", desc: "Xoay dao tại chỗ gây sát thương phép cực lớn lên kẻ địch lân cận." } },
-    'talon':  { hp: 750, dmg: 95, range: 1, as: 0.90, type: 'melee', skill: 'noxian_diplomacy', armor: 35, skillInfo: { name: "Ngoại Giao Kiểu Noxus", desc: "Đâm mạnh vào mục tiêu gây sát thương chí mạng." } },
-    'minion_melee': { hp: 200, dmg: 15, range: 1, as: 0.6, type: 'melee', armor: 0 }, 
-    'minion_range': { hp: 120, dmg: 20, range: 4, as: 0.7, type: 'range', projColor: 0x5555ff, armor: 0 },
-    'krug':         { hp: 1200, dmg: 80, range: 1, as: 0.5, type: 'melee', armor: 50 },
-    'wolf':         { hp: 600,  dmg: 110, range: 1, as: 1.0, type: 'melee', armor: 20 },
-    'raptor':       { hp: 800,  dmg: 130,range: 1, as: 1.2, type: 'melee', armor: 20 },
-    'herald':       { hp: 3000, dmg: 200, range: 1, as: 0.6, type: 'melee', armor: 60 },
-    'dragon':       { hp: 6000, dmg: 300,range: 2, as: 0.6, type: 'melee', armor: 100, skill: 'dragon_breath' }
+    'garen':  { hp: 650, dmg: 55, range: 1, as: 0.60, type: 'melee', skill: 'spin', armor: 35, critChance: 0.25, skillInfo: { name: "Phán Quyết", desc: "Xoay kiếm trong 3s, gây sát thương vật lý liên tục lên kẻ địch lân cận." } },
+    'darius': { hp: 700, dmg: 60, range: 1, as: 0.55, type: 'melee', skill: 'guillotine', armor: 35, critChance: 0.25, skillInfo: { name: "Máy Chém Noxus", desc: "Bổ rìu gây sát thương lớn và hồi máu cho bản thân." } },
+    'vi':     { hp: 750, dmg: 70, range: 1, as: 0.65, type: 'melee', skill: 'uppercut', armor: 40, critChance: 0.25, skillInfo: { name: "Tả Xung Hữu Đột", desc: "Đấm xuyên mục tiêu, gây sát thương và làm choáng 1.5s." } },
+    'riven':  { hp: 850, dmg: 80, range: 1, as: 0.70, type: 'melee', skill: 'wind_slash', armor: 40, critChance: 0.25, skillInfo: { name: "Chém Gió", desc: "Phóng sóng năng lượng gây sát thương diện rộng phía trước." } },
+    'yasuo':  { hp: 950, dmg: 95, range: 1, as: 0.80, type: 'melee', skill: 'tornado', armor: 35, critChance: 0.25, skillInfo: { name: "Trăn Trối", desc: "Phóng lốc xoáy hất tung và gây sát thương lên kẻ địch." } },
+    'poppy':  { hp: 700, dmg: 45, range: 1, as: 0.55, type: 'melee', skill: 'hammer_smash', armor: 50, critChance: 0.25, skillInfo: { name: "Sứ Giả Phán Quyết", desc: "Dậm búa gây sát thương và làm choáng mục tiêu 2s." } },
+    'malph':  { hp: 750, dmg: 50, range: 1, as: 0.50, type: 'melee', skill: 'ground_slam', armor: 55, critChance: 0.25, skillInfo: { name: "Dậm Đất", desc: "Dậm mạnh xuống đất gây sát thương diện rộng." } },
+    'fiora':  { hp: 600, dmg: 50, range: 1, as: 0.80, type: 'melee', skill: 'grand_challenge', armor: 35, critChance: 0.25, skillInfo: { name: "Phản Đòn", desc: "Chặn sát thương, sau đó đâm trả gây choáng và hồi máu." } },
+    'leo':    { hp: 900, dmg: 45, range: 1, as: 0.50, type: 'melee', skill: 'solar_flare', armor: 60, critChance: 0.25, skillInfo: { name: "Thái Dương Hạ San", desc: "Gọi cột sáng làm choáng kẻ địch ở trung tâm vụ nổ." } },
+    'braum':  { hp: 1150,dmg: 55, range: 1, as: 0.45, type: 'melee', skill: 'ice_fissure', armor: 70, critChance: 0.25, skillInfo: { name: "Băng Địa Chấn", desc: "Tạo khe nứt băng giá hất tung kẻ địch theo đường thẳng." } },
+    'vayne':  { hp: 500, dmg: 65, range: 5, as: 0.75, type: 'range', projColor: 0xaaaaaa, skill: 'silver_bolts', armor: 20, critChance: 0.25, skillInfo: { name: "Mũi Tên Bạc", desc: "Mỗi đòn đánh thứ 3 gây thêm sát thương chuẩn." } },
+    'cait':   { hp: 550, dmg: 60, range: 8, as: 0.65, type: 'range', projColor: 0x00ff00, skill: 'ace_shot', armor: 20, critChance: 0.25, skillInfo: { name: "Bách Phát Bách Trúng", desc: "Ngắm bắn gây sát thương cực lớn cho kẻ địch xa nhất." } },
+    'varus':  { hp: 600, dmg: 75, range: 6, as: 0.70, type: 'range', projColor: 0xaa00aa, skill: 'corruption', armor: 25, critChance: 0.25, skillInfo: { name: "Sợi Xích Tội Lỗi", desc: "Bắn ra dây xích trói chân và gây sát thương phép." } },
+    'ashe':   { hp: 550, dmg: 70, range: 6, as: 0.75, type: 'range', projColor: 0x00ffff, skill: 'crystal_arrow', armor: 20, critChance: 0.25, skillInfo: { name: "Đại Băng Tiễn", desc: "Bắn mũi tên băng khổng lồ làm choáng mục tiêu." } },
+    'jhin':   { hp: 650, dmg: 160,range: 7, as: 0.50, type: 'range', projColor: 0xff0000, skill: 'curtain_call', armor: 25, critChance: 0.25, skillInfo: { name: "Sân Khấu Tử Thần", desc: "Viên đạn thứ 4 chắc chắn chí mạng với sát thương khủng." } },
+    'ziggs':  { hp: 480, dmg: 45, range: 4, as: 0.65, type: 'range', projColor: 0xe056fd, skill: 'bouncing_bomb', armor: 20, critChance: 0.25, skillInfo: { name: "Bom Nảy", desc: "Ném bom gây sát thương phép lan cho mục tiêu và kẻ địch cạnh bên." } },
+    'tf':     { hp: 520, dmg: 50, range: 4, as: 0.70, type: 'range', projColor: 0xffff00, skill: 'wild_cards', armor: 20, critChance: 0.25, skillInfo: { name: "Phi Bài", desc: "Phi 3 lá bài theo hình nón gây sát thương phép." } },
+    'annie':  { hp: 650, dmg: 55, range: 3, as: 0.60, type: 'range', projColor: 0xd35400, skill: 'disintegrate', armor: 35, critChance: 0.25, skillInfo: { name: "Khiên Lửa", desc: "Tạo khiên bảo vệ bản thân và thiêu đốt kẻ địch xung quanh." } },
+    'lux':    { hp: 580, dmg: 60, range: 7, as: 0.70, type: 'range', projColor: 0xffffff, skill: 'final_spark', armor: 25, critChance: 0.25, skillInfo: { name: "Cầu Vồng Tối Thượng", desc: "Bắn dải sáng xuyên thấu gây sát thương phép cực mạnh." } },
+    'velkoz': { hp: 700, dmg: 75, range: 5, as: 0.65, type: 'range', projColor: 0x8e44ad, skill: 'life_form_ray', armor: 30, critChance: 0.25, skillInfo: { name: "Tia Phân Hủy", desc: "Bắn tia laser gây sát thương phép liên tục theo thời gian." } },
+    'khazix': { hp: 550, dmg: 60, range: 1, as: 0.75, type: 'melee', skill: 'taste_fear', armor: 25, critChance: 0.25, skillInfo: { name: "Nếm Mùi Sợ Hãi", desc: "Gây sát thương vật lý. x2 Sát thương nếu mục tiêu bị cô lập." } },
+    'noc':    { hp: 600, dmg: 65, range: 1, as: 0.80, type: 'melee', skill: 'umbra_blades', armor: 30, critChance: 0.25, skillInfo: { name: "Lưỡi Dao Bóng Tối", desc: "Xoay người gây sát thương diện rộng và hồi máu." } },
+    'zed':    { hp: 650, dmg: 75, range: 1, as: 0.85, type: 'melee', skill: 'razor_shuriken', armor: 30, critChance: 0.25, skillInfo: { name: "Phi Tiêu Sắc Lẻm", desc: "Ném phi tiêu xuyên thấu gây sát thương vật lý." } },
+    'kat':    { hp: 700, dmg: 70, range: 1, as: 0.80, type: 'melee', skill: 'death_lotus', armor: 30, critChance: 0.25, skillInfo: { name: "Bông Sen Tử Thần", desc: "Xoay dao tại chỗ gây sát thương phép cực lớn lên kẻ địch lân cận." } },
+    'talon':  { hp: 750, dmg: 95, range: 1, as: 0.90, type: 'melee', skill: 'noxian_diplomacy', armor: 35, critChance: 0.25, skillInfo: { name: "Ngoại Giao Kiểu Noxus", desc: "Đâm mạnh vào mục tiêu gây sát thương chí mạng." } },
+    'minion_melee': { hp: 200, dmg: 15, range: 1, as: 0.6, type: 'melee', armor: 0, critChance: 0 }, 
+    'minion_range': { hp: 120, dmg: 20, range: 4, as: 0.7, type: 'range', projColor: 0x5555ff, armor: 0, critChance: 0 },
+    'krug':         { hp: 1200, dmg: 80, range: 1, as: 0.5, type: 'melee', armor: 50, critChance: 0 },
+    'wolf':         { hp: 600,  dmg: 110, range: 1, as: 1.0, type: 'melee', armor: 20, critChance: 0.1 },
+    'raptor':       { hp: 800,  dmg: 130,range: 1, as: 1.2, type: 'melee', armor: 20, critChance: 0.1 },
+    'herald':       { hp: 3000, dmg: 200, range: 1, as: 0.6, type: 'melee', armor: 60, critChance: 0 },
+    'dragon':       { hp: 6000, dmg: 300,range: 2, as: 0.6, type: 'melee', armor: 100, skill: 'dragon_breath', critChance: 0.2 }
 };
 
 // --- CẤU HÌNH VÒNG ĐẤU ---

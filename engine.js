@@ -13,6 +13,8 @@ export class Unit {
         this.mana = 0; 
         this.maxMana = 100; 
         this.items = [];
+        this.rng = null; // MỚI: Placeholder cho RNG
+
         this.bar = document.createElement('div'); 
         this.bar.className = `bar-wrap ${team} star-1`;
         this.bar.innerHTML = `<div class="item-badge-container"></div><div class="bar-hp"><div class="bar-fill"></div></div><div class="bar-mana"><div class="mana-fill"></div></div>`;
@@ -36,6 +38,11 @@ export class Unit {
         this.updateStats(); 
         this.updateBar(); 
         this.updateBarPos();
+    }
+
+    // MỚI: Hàm nhận RNG từ GameManager
+    setRNG(rng) {
+        this.rng = rng;
     }
 
     reset() {
@@ -124,8 +131,20 @@ export class Unit {
         let newDmg = Math.floor(base.dmg * multiplier); 
         let newAs = base.as; 
         let newArmor = base.armor || 0; 
-        this.items.forEach(id => { const stats = ITEMS[id].stats; if(stats.hp) newMaxHp += stats.hp; if(stats.dmg) newDmg += stats.dmg; if(stats.as) newAs += stats.as; if(stats.armor) newArmor += stats.armor; });
-        this.maxHp = newMaxHp; this.currStats = { ...base, dmg: newDmg, as: newAs, armor: newArmor };
+        // MỚI: Thêm critChance
+        let newCrit = base.critChance || 0;
+
+        this.items.forEach(id => { 
+            const stats = ITEMS[id].stats; 
+            if(stats.hp) newMaxHp += stats.hp; 
+            if(stats.dmg) newDmg += stats.dmg; 
+            if(stats.as) newAs += stats.as; 
+            if(stats.armor) newArmor += stats.armor; 
+        });
+        
+        this.maxHp = newMaxHp; 
+        this.currStats = { ...base, dmg: newDmg, as: newAs, armor: newArmor, critChance: newCrit };
+        
         if(this.hp === undefined) { this.hp = this.maxHp; } 
         else { 
             const diff = newMaxHp - oldMaxHp; 
@@ -234,14 +253,26 @@ export class Unit {
 
     attack() {
         this.atkAnimTimer = 1.0; 
+        
+        // --- LOGIC RNG MỚI (CHÍ MẠNG) ---
+        // Sử dụng this.rng nếu có (trong combat), ngược lại dùng Math.random
+        const r = this.rng ? this.rng.next() : Math.random();
+        const critChance = this.currStats.critChance || 0;
+        const isCrit = r < critChance;
+        const finalDmg = isCrit ? Math.floor(this.currStats.dmg * 1.5) : this.currStats.dmg;
+
         if (this.currStats.type === 'range') {
             const color = this.currStats.projColor || 0xffffff;
-            setTimeout(() => { if(!this.isDead && this.target) this.gm.view.spawnProjectile(this.group.position, this.target, color, this.currStats.dmg); }, 100); 
+            setTimeout(() => { 
+                if(!this.isDead && this.target) 
+                    this.gm.view.spawnProjectile(this.group.position, this.target, color, finalDmg); 
+            }, 100); 
         } else {
             setTimeout(() => {
                 if(!this.isDead && this.target) {
+                    // Nếu chí mạng, có thể thêm hiệu ứng riêng sau này
                     this.gm.view.spawnVFX(this.target.group.position, 'impact');
-                    this.target.takeDmg(this.currStats.dmg);
+                    this.target.takeDmg(finalDmg);
                 }
             }, 250); 
         }

@@ -1,4 +1,4 @@
-import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS } from './shared.js';
+import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS, SeededRNG } from './shared.js';
 import { Unit, ViewManager } from './engine.js';
 import { UnitFactory } from './3d.js'; 
 import { ref, update, onValue, set, off, get } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
@@ -51,8 +51,14 @@ export class GameManager {
         this.mode = this.settings.mode || 'pve'; 
         this.db = this.settings.db;
         this.matchId = this.settings.matchId;
-        this.myId = this.settings.myId;
+        this.myId = this.settings.myId || 'local_player';
         this.opponentId = this.settings.opponentId;
+
+        // --- RNG SETUP ---
+        // 1. Shop RNG: Dùng riêng cho mỗi người (Shop, Lõi, Rớt đồ)
+        this.shopRNG = new SeededRNG(this.myId);
+        // 2. Combat RNG: Sẽ được khởi tạo đồng bộ khi startCombat
+        this.combatRNG = null;
 
         this.units = []; this.hexes = []; this.interestOrbs = [];
         this.vfxList = []; this.projList = [];
@@ -68,7 +74,8 @@ export class GameManager {
         this.pendingResult = null;
 
         const components = Object.keys(ITEMS).filter(key => ITEMS[key].isComponent);
-        const randomStartItem = components[Math.floor(Math.random() * components.length)];
+        // Dùng shopRNG để random item khởi đầu
+        const randomStartItem = components[Math.floor(this.shopRNG.next() * components.length)];
         this.inventory = [randomStartItem];
 
         this.augments = []; this.augmentPool = [...AUGMENTS]; 
@@ -201,6 +208,8 @@ export class GameManager {
         const group = UnitFactory.createUnitGroup(data, hex, team);
         this.view.scene.add(group);
         const unit = new Unit(group, data, team, this);
+        // Nếu đang trong combat hoặc đã có combatRNG, gán cho unit mới luôn
+        if (this.combatRNG) unit.setRNG(this.combatRNG);
         this.units.push(unit);
         return unit;
     }
@@ -271,8 +280,7 @@ export class GameManager {
             this.updateGhostPos(e);
         }
     }
-
-    async startCombat() {
+        async startCombat() {
         if(this.phase === 'combat') return;
         const active = this.units.filter(u=>u.team==='player' && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench);
         if(!active.length) { this.view.toast("Không có tướng! Tự động thua."); }
@@ -281,6 +289,16 @@ export class GameManager {
         this.timer = TIMERS.COMBAT; 
         this.updateUIPhase(true); 
         
+        // --- ĐỒNG BỘ RNG CHO COMBAT (CRIT, SKILL, TARGET) ---
+        // Tạo seed chung dựa trên MatchID + Stage + SubRound
+        // Cả 2 người chơi sẽ có seed giống hệt nhau ở round này -> Kết quả combat giống nhau
+        const seedKey = `${this.matchId}_${this.stage}_${this.subRound}`;
+        this.combatRNG = new SeededRNG(seedKey);
+        
+        // Gán RNG chung cho tất cả các unit hiện có
+        this.units.forEach(u => u.setRNG(this.combatRNG));
+
+        // Xóa unit địch cũ
         this.units.filter(u=>u.team==='enemy').forEach(u=>u.destroy()); 
         this.units = this.units.filter(u=>u.team==='player'); 
         
@@ -351,20 +369,21 @@ export class GameManager {
     spawnBotFallback() {
         this.view.toast("PVP START (vs BOT)!");
         const enemyHexes = this.hexes.filter(h => !h.userData.isPlayer && !h.userData.occupied);
-        const shuffledHexes = enemyHexes.sort(() => 0.5 - Math.random());
+        // Bot random thì dùng shopRNG cũng được để nó cố định theo người chơi
+        const shuffledHexes = enemyHexes.sort(() => 0.5 - this.shopRNG.next());
         let botLvl = Math.min(this.stage + 2, 9);
         for(let i=0; i < botLvl; i++) {
             if(shuffledHexes[i]) {
-                const botUnitData = this.rollChamp(botLvl);
+                const botUnitData = this.rollChamp(botLvl); // Đã dùng shopRNG bên trong
                 const enemy = this.createUnit(botUnitData, shuffledHexes[i], 'enemy');
-                const r = Math.random();
+                const r = this.shopRNG.next();
                 let targetStar = 1;
                 if (this.stage >= 3) { if (r < 0.3) targetStar = 2; }
                 if (this.stage >= 5) { if (r < 0.6) targetStar = 2; else if (r > 0.9) targetStar = 3; }
                 for(let s=1; s < targetStar; s++) enemy.upgradeStar();
-                if (this.stage >= 3 && Math.random() > 0.5) {
+                if (this.stage >= 3 && this.shopRNG.next() > 0.5) {
                     const itemKeys = Object.keys(ITEMS);
-                    enemy.addItem(itemKeys[Math.floor(Math.random()*itemKeys.length)]);
+                    enemy.addItem(itemKeys[Math.floor(this.shopRNG.next()*itemKeys.length)]);
                 }
                 enemy.hp = enemy.maxHp; 
                 enemy.updateBar();
@@ -482,7 +501,6 @@ export class GameManager {
         this.units.filter(u => u.team === 'enemy').forEach(u => u.destroy());
         this.units = this.units.filter(u => u.team === 'player');
         
-        // --- SỬA LỖI: Buộc thoát khỏi trạng thái chờ khi chọn lõi ---
         this.isWaiting = false;
         
         const modal = document.getElementById('augment-modal');
@@ -494,9 +512,10 @@ export class GameManager {
         title.innerText = "LỰA CHỌN LÕI CÔNG NGHỆ";
         container.innerHTML = ''; 
         const choices = [];
+        // Dùng shopRNG để chọn Augment
         for (let i = 0; i < 3; i++) {
             if (this.augmentPool.length === 0) break;
-            const idx = Math.floor(Math.random() * this.augmentPool.length);
+            const idx = Math.floor(this.shopRNG.next() * this.augmentPool.length);
             choices.push(this.augmentPool[idx]);
             this.augmentPool.splice(idx, 1);
         }
@@ -556,7 +575,8 @@ export class GameManager {
                     if (aug.type === 'item') {
                         const allItems = Object.keys(ITEMS);
                         const candidates = aug.id === 'secret_weapon' ? allItems.filter(k => ITEMS[k].isComponent) : allItems.filter(k => !ITEMS[k].isComponent);
-                        const reward = candidates[Math.floor(Math.random() * candidates.length)];
+                        // Dùng shopRNG cho reward ngẫu nhiên
+                        const reward = candidates[Math.floor(this.shopRNG.next() * candidates.length)];
                         if (this.inventory.length < 8) this.inventory.push(reward); else { this.gold += 5; this.view.toast("Túi đầy -> +5 vàng"); }
                         this.view.renderInventory();
                     }
@@ -572,16 +592,17 @@ export class GameManager {
     }
 
     onMonsterDeath(monster) {
-        if (Math.random() < 0.3) {
+        // Dùng shopRNG cho tỉ lệ rơi đồ
+        if (this.shopRNG.next() < 0.3) {
             const componentKeys = Object.keys(ITEMS).filter(k => ITEMS[k].isComponent);
-            const randomItem = componentKeys[Math.floor(Math.random() * componentKeys.length)];
+            const randomItem = componentKeys[Math.floor(this.shopRNG.next() * componentKeys.length)];
             if (this.inventory.length < 8) { 
                 this.inventory.push(randomItem); 
                 this.view.renderInventory(); 
                 this.view.toast(`Nhặt được: ${ITEMS[randomItem].name}`); 
             } else { this.gold += 2; this.view.toast("Túi đầy: +2 vàng"); }
         } else {
-            const goldDrop = Math.floor(Math.random() * 3) + 1; 
+            const goldDrop = Math.floor(this.shopRNG.next() * 3) + 1; 
             this.gold += goldDrop; this.view.updateUI();
             this.view.toast(`Nhặt được: ${goldDrop} vàng`); 
         }
@@ -599,6 +620,8 @@ export class GameManager {
                 const spawnHex = this.hexes[mirrorIdx];
                 if (spawnHex) {
                     const enemy = this.createUnit(champData, spawnHex, 'enemy');
+                    // Gán combatRNG cho enemy
+                    if(this.combatRNG) enemy.setRNG(this.combatRNG);
                     enemy.star = 1; for(let i=1; i<ud.star; i++) enemy.upgradeStar();
                     enemy.items = ud.items || []; enemy.updateStats();
                 }
@@ -800,9 +823,13 @@ export class GameManager {
     }
 
     rollChamp(lvl) {
-        const odds = SHOP_ODDS[lvl] || [100,0,0,0]; const r = Math.random()*100;
+        const odds = SHOP_ODDS[lvl] || [100,0,0,0];
+        // Dùng shopRNG cho tỉ lệ shop
+        const r = this.shopRNG.next()*100;
         let cost=1; let sum=0; for(let i=0; i<4; i++) { sum+=odds[i]; if(r<=sum) { cost=i+1; break; } }
-        const pool = CHAMPS.filter(c=>c.cost===cost); return pool.length ? pool[Math.floor(Math.random()*pool.length)] : CHAMPS[0];
+        const pool = CHAMPS.filter(c=>c.cost===cost); 
+        // Dùng shopRNG để chọn tướng cụ thể
+        return pool.length ? pool[Math.floor(this.shopRNG.next()*pool.length)] : CHAMPS[0];
     }
     getXpNeed() { return XP_TO_LEVEL[this.lvl] || 9999; }
     
