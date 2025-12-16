@@ -1,27 +1,23 @@
+// logic.js - PHẦN 1: CORE LOOP & SYNC
 import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS } from './shared.js';
 import { Unit, ViewManager } from './engine.js';
 import { UnitFactory } from './3d.js'; 
-import { ref, update, onValue, set, off, get } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+import { StreakManager } from './featured.js'; 
+import { ref, update, onValue, set, off, get, child } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
 
 function createIconTexture(text, color) {
     const canvas = document.createElement('canvas');
     canvas.width = 128; canvas.height = 128;
     const ctx = canvas.getContext('2d');
-    ctx.beginPath();
-    ctx.arc(64, 64, 58, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(20, 30, 40, 0.9)'; 
-    ctx.fill();
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = color; 
-    ctx.stroke();
-    ctx.font = '80px Arial';
-    ctx.fillStyle = color;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, 64, 70); 
+    ctx.beginPath(); ctx.arc(64, 64, 58, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(20, 30, 40, 0.9)'; ctx.fill();
+    ctx.lineWidth = 8; ctx.strokeStyle = color; ctx.stroke();
+    ctx.font = '80px Arial'; ctx.fillStyle = color;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 64, 70); 
     return new THREE.CanvasTexture(canvas);
 }
 
+// Patch updateStats
 const originalUpdateStats = Unit.prototype.updateStats;
 Unit.prototype.updateStats = function() {
     originalUpdateStats.call(this); 
@@ -49,18 +45,20 @@ export class GameManager {
     constructor(settings) {
         this.settings = settings || {};
         this.mode = this.settings.mode || 'pve'; 
-        this.role = this.settings.role || 'host'; 
+        this.role = this.settings.role || 'host'; // Host = Server, Guest = Client
         this.db = this.settings.db;
         this.matchId = this.settings.matchId;
         this.myId = this.settings.myId;
         this.opponentId = this.settings.opponentId;
 
+        this.streakManager = new StreakManager();
         this.units = []; this.hexes = []; this.interestOrbs = [];
         this.vfxList = []; this.projList = [];
         this.isGameStarted = false;
         
         this.netUnits = {}; 
         this.syncTimer = 0;
+        this.networkTick = 0;
         
         this.gold = 4; this.lvl = 1; this.xp = 0; this.php = 100; this.ehp = 100; 
         this.stage = 1; this.subRound = 1; this.phase = 'prep';
@@ -69,7 +67,6 @@ export class GameManager {
         
         this.isWaiting = false;
         this.isPvpLoading = false; 
-        this.pendingResult = null;
 
         const components = Object.keys(ITEMS).filter(key => ITEMS[key].isComponent);
         const randomStartItem = components[Math.floor(Math.random() * components.length)];
@@ -92,14 +89,73 @@ export class GameManager {
             this.initInput();
             this.view.renderInventory(); 
             
+            // LOGIC PVP KHỞI TẠO
             if(this.mode === 'pvp') {
-                this.listenMatchState();
-                this.view.toast(this.role === 'host' ? "PVP MODE (HOST)" : "PVP MODE (SPECTATOR)");
+                this.initNetwork(); // Hàm mới: Quản lý toàn bộ sự kiện mạng
+                this.view.toast(this.role === 'host' ? "BẠN LÀ HOST (MÁY CHỦ)" : "BẠN LÀ GUEST (KHÁCH)");
             }
 
             this.lastTime = performance.now();
             this.loop(); 
         } catch(e) { console.error("Game Init Error:", e); alert("Lỗi: " + e.message); }
+    }
+
+    // --- NETWORK CORE: XỬ LÝ ĐỒNG BỘ ---
+    initNetwork() {
+        const globalRef = ref(this.db, `matches/${this.matchId}/globalState`);
+        const syncRef = ref(this.db, `matches/${this.matchId}/sync`);
+        const boardRef = ref(this.db, `matches/${this.matchId}/boards`);
+        const resultRef = ref(this.db, `matches/${this.matchId}/result`);
+
+        // 1. Guest lắng nghe trạng thái game từ Host
+        if (this.role === 'guest') {
+            onValue(globalRef, (snap) => {
+                const state = snap.val();
+                if (!state) return;
+                
+                // Đồng bộ thời gian và phase
+                // Nếu server chuyển phase, client chuyển theo ngay lập tức
+                if (state.phase !== this.phase) {
+                    this.phase = state.phase;
+                    if (this.phase === 'prep') this.endCombat(null, true); // True = Force reset
+                    if (this.phase === 'combat') this.startCombat(true);   // True = Force start
+                }
+                
+                this.timer = state.timer;
+                this.stage = state.stage;
+                this.subRound = state.subRound;
+                
+                // Cập nhật UI ngay
+                this.view.updateUI();
+                const roundText = document.getElementById('round-display');
+                if(roundText) roundText.innerText = `${this.stage}-${this.subRound}`;
+            });
+
+            // Lắng nghe dữ liệu combat (vị trí tướng)
+            this.listenToCombatSync();
+        }
+
+        // 2. Cả 2 cùng nghe kết quả trận đấu (Round Result)
+        onValue(resultRef, (snap) => {
+            const res = snap.val();
+            if (res && res.round === `${this.stage}-${this.subRound}` && this.phase === 'combat') {
+                const amIWinner = res.winner === this.myId;
+                // Host đã tính xong kết quả, Guest nhận và hiển thị
+                if (this.role === 'guest') {
+                    this.finalizeRound(amIWinner);
+                }
+            }
+        });
+
+        // 3. Lắng nghe cập nhật Máu đối thủ
+        const statesRef = ref(this.db, `matches/${this.matchId}/states`);
+        onValue(statesRef, (snap) => {
+            const s = snap.val();
+            if(s && s[this.opponentId]) {
+                this.ehp = s[this.opponentId].hp;
+                this.view.updateUI();
+            }
+        });
     }
 
     loop() {
@@ -109,14 +165,22 @@ export class GameManager {
         this.lastTime = now;
 
         if (this.isGameStarted && !this.isWaiting && !this.isPvpLoading) {
+            
+            // LOGIC TIME: Chỉ Host được phép trừ thời gian và update lên Server
             if (this.mode === 'pve' || this.role === 'host') {
                 this.updateTimer(dt);
             }
-            
+            // Guest chỉ việc render, timer đã được sync qua socket ở initNetwork
+
+            // LOGIC UPDATE UNITS
             if (this.phase === 'combat' && this.mode === 'pvp' && this.role === 'guest') {
+                // Guest: Chỉ render interpolation (làm mượt chuyển động) từ data server
                 if (this.updateGuestVisuals) this.updateGuestVisuals(dt);
             } else {
+                // Host & PvE: Tính toán logic game thực tế
                 this.units.forEach(u => u.update(now * 0.001, this.units));
+                
+                // Host: Gửi data vị trí cho Guest
                 if (this.phase === 'combat' && this.mode === 'pvp' && this.role === 'host') {
                     if (this.syncHostToGuest) this.syncHostToGuest(dt);
                 }
@@ -125,18 +189,24 @@ export class GameManager {
 
         this.view.updateCamera();
         
+        // CHECK END COMBAT (Chỉ Host hoặc PVE mới được quyền quyết định kết thúc)
         if(this.phase === 'combat' && !this.isWaiting && !this.isPvpLoading) {
             if (this.mode === 'pve' || this.role === 'host') {
                 const playerLive = this.units.filter(u => u.team === 'player' && !u.isDead && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench).length;
                 const enemyLive = this.units.filter(u => u.team === 'enemy' && !u.isDead).length;
-                if (playerLive === 0) this.endCombat(false); 
+                
+                // Logic thắng thua
+                if (playerLive === 0 && enemyLive === 0) this.endCombat(false); // Hòa
+                else if (playerLive === 0) this.endCombat(false); 
                 else if (enemyLive === 0) this.endCombat(true); 
             }
         }
 
+        // Clean up VFX
         for(let i=this.vfxList.length-1; i>=0; i--) { if(!this.vfxList[i].update()) { this.vfxList.splice(i, 1); } }
         for(let i=this.projList.length-1; i>=0; i--) { if(!this.projList[i].update()) { this.projList.splice(i, 1); } }
         
+        // Render UI Orbs
         const maxInterest = this.augments.find(a => a.id === 'rich_get_richer') ? 7 : 5;
         const interest = Math.min(Math.floor(this.gold / 10), maxInterest);
         this.interestOrbs.forEach((orb, i) => { 
@@ -144,6 +214,7 @@ export class GameManager {
             if(orb.visible) { orb.position.y = orb.userData.baseY + Math.sin(now * 0.003 + orb.userData.offset)*0.2; } 
         });
 
+        // Render Augment Pillar
         if (this.pillarIcons) {
             this.pillarIcons.forEach((icon, i) => {
                 if(icon.visible) {
@@ -158,7 +229,23 @@ export class GameManager {
 
     updateTimer(dt) {
         if (this.php <= 0 || this.ehp <= 0) return; 
+        
         this.timer -= dt;
+
+        // HOST SYNC: Cứ mỗi 1 giây hoặc khi hết giờ, Host cập nhật state lên Firebase
+        if (this.mode === 'pvp' && this.role === 'host') {
+            this.networkTick += dt;
+            if (this.networkTick > 0.5 || this.timer <= 0) { // Sync 2 lần/giây
+                this.networkTick = 0;
+                update(ref(this.db, `matches/${this.matchId}/globalState`), {
+                    timer: this.timer,
+                    phase: this.phase,
+                    stage: this.stage,
+                    subRound: this.subRound
+                });
+            }
+        }
+
         const timerFill = document.getElementById('timer-bar-fill');
         const timerText = document.getElementById('timer-text');
         const phaseText = document.getElementById('phase-text');
@@ -178,12 +265,14 @@ export class GameManager {
                 this.autoDeploy(); 
                 this.startCombat();
             } else {
+                // Hết giờ combat mà chưa ai chết hết -> Hòa (Draw)
                 this.view.toast("HẾT GIỜ! HÒA!");
                 this.endCombat(false); 
             }
         }
     }
 
+    // Các hàm Helper cơ bản (Giữ nguyên logic cũ)
     autoDeploy() {
         const limitBonus = this.augments.find(a => a.id === 'new_recruit') ? 1 : 0;
         const limit = this.lvl + limitBonus;
@@ -208,8 +297,7 @@ export class GameManager {
         });
         if (currentCount > activeUnits.length) {
             this.view.toast("Tự động ra trận!");
-            this.calcSyn();
-            this.view.updateUI();
+            this.calcSyn(); this.view.updateUI(); this.streakManager.render();
         }
     }
 
@@ -228,8 +316,7 @@ export class GameManager {
         this.gold -= data.cost;
         const newUnit = this.createUnit(data, benchHex, 'player');
         this.checkTriple(newUnit);
-        this.calcSyn();
-        this.view.updateUI();
+        this.calcSyn(); this.view.updateUI(); this.streakManager.render();
         return true;
     }
 
@@ -239,19 +326,14 @@ export class GameManager {
             const refund = unit.data.cost * Math.pow(3, unit.star - 1);
             this.gold += refund;
             if(unit.items.length > 0) {
-                unit.items.forEach(item => {
-                    if(this.inventory.length < 10) this.inventory.push(item);
-                });
-                this.view.renderInventory();
-                this.view.toast("Đã thu hồi trang bị");
+                unit.items.forEach(item => { if(this.inventory.length < 10) this.inventory.push(item); });
+                this.view.renderInventory(); this.view.toast("Đã thu hồi trang bị");
             }
             unit.destroy();
             this.units = this.units.filter(u => u !== unit);
             if(unit.netId && this.netUnits[unit.netId]) delete this.netUnits[unit.netId];
-            
             this.view.toast(`Bán +${refund}g`);
-            this.calcSyn();
-            this.view.updateUI();
+            this.calcSyn(); this.view.updateUI(); this.streakManager.render();
         }
     }
 
@@ -259,19 +341,14 @@ export class GameManager {
         if(unit.star >= 3) return;
         const sameUnits = this.units.filter(u => u.team === 'player' && u.data.id === unit.data.id && u.star === unit.star && !u.isDead);
         if(sameUnits.length >= 3) {
-            const u1 = sameUnits[0];
-            const u2 = sameUnits[1];
-            const u3 = sameUnits[2];
+            const u1 = sameUnits[0]; const u2 = sameUnits[1]; const u3 = sameUnits[2];
             const targetHex = u3.group.children.find(c=>c.name==='hitbox').userData.hex;
             const collectedItems = [...u1.items, ...u2.items, ...u3.items].slice(0, 3); 
-            
             [u1, u2, u3].forEach(u => { if(u.netId) delete this.netUnits[u.netId]; });
-
             u1.destroy(); u2.destroy(); u3.destroy();
             this.units = this.units.filter(u => u !== u1 && u !== u2 && u !== u3);
             const newUnit = this.createUnit(unit.data, targetHex, 'player');
-            newUnit.star = unit.star; 
-            newUnit.upgradeStar();
+            newUnit.star = unit.star; newUnit.upgradeStar();
             collectedItems.forEach(item => newUnit.addItem(item));
             newUnit.updateStats();
             this.view.spawnVFX(newUnit.group.position, 'upgrade');
@@ -279,10 +356,9 @@ export class GameManager {
             this.checkTriple(newUnit);
         }
     }
+    
     handleItemStart(e, index, el) {
-        e.stopPropagation();
-        this.dragItem = index;
-        this.dragItemEl = el;
+        e.stopPropagation(); this.dragItem = index; this.dragItemEl = el;
         const ghost = document.getElementById('drag-ghost');
         if(ghost) {
             ghost.classList.remove('hidden');
@@ -291,9 +367,13 @@ export class GameManager {
             this.updateGhostPos(e);
         }
     }
+// ... HẾT PHẦN 1 - TIẾP TỤC Ở PHẦN 2 ...
+// ... (Tiếp theo của PHẦN 1)
 
-    async startCombat() {
-        if(this.phase === 'combat') return;
+    // --- LOGIC COMBAT ---
+    async startCombat(forceStart = false) {
+        if(this.phase === 'combat' && !forceStart) return;
+        
         const active = this.units.filter(u=>u.team==='player' && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench);
         if(!active.length) { this.view.toast("Không có tướng! Tự động thua."); }
         
@@ -303,21 +383,31 @@ export class GameManager {
         
         this.netUnits = {};
 
-        const prefix = (this.mode === 'pvp' && this.role === 'host') ? 'h_' : 'g_';
-        
-        active.forEach((u, i) => {
-            u.netId = `${prefix}${i}`;
-            this.netUnits[u.netId] = u;
-        });
-
+        // Xóa sạch địch cũ
         this.units.filter(u=>u.team==='enemy').forEach(u=>u.destroy()); 
         this.units = this.units.filter(u=>u.team==='player'); 
         
+        // PVE MODE
         const roundKey = `${this.stage}-${this.subRound}`;
-        if (PVE_ROUNDS[roundKey]) {
+        if (this.mode === 'pve' && PVE_ROUNDS[roundKey]) {
             this.spawnPveEnemies(PVE_ROUNDS[roundKey]);
-        } else {
+        } 
+        // PVP MODE
+        else if (this.mode === 'pvp') {
+            // Định danh NetID để đồng bộ
+            // Host: Quân mình là h_0, h_1... Quân địch (Guest) là g_0, g_1...
+            // Guest: Quân mình là g_0, g_1... Quân địch (Host) là h_0, h_1...
+            const myPrefix = (this.role === 'host') ? 'h_' : 'g_';
+            active.forEach((u, i) => {
+                u.netId = `${myPrefix}${i}`;
+                this.netUnits[u.netId] = u;
+            });
+
             await this.spawnPvpOpponent(active);
+        }
+        else {
+             // Fallback bot (nếu cần)
+             this.spawnBotFallback();
         }
         this.view.closeInspector();
     }
@@ -341,44 +431,70 @@ export class GameManager {
     }
 
     async spawnPvpOpponent(activeUnits) {
-        if (this.mode === 'pvp') {
-            this.isPvpLoading = true;
-            this.view.toast("Đang tải dữ liệu đối thủ...");
-            
-            const myBoardData = this.serializeBoard(activeUnits);
-            await update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), {
-                units: myBoardData,
-                ready: true
-            });
-            
-            const enemyRef = ref(this.db, `matches/${this.matchId}/boards/${this.opponentId}`);
-            let found = false;
-            
-            const onData = (snap) => {
-                const data = snap.val();
-                if (data && data.ready && !found) {
-                    found = true;
-                    off(enemyRef, 'value', onData); 
-                    this.spawnEnemyFromData(data.units);
+        this.isPvpLoading = true;
+        
+        // 1. Gửi đội hình mình lên Server
+        const myBoardData = this.serializeBoard(activeUnits);
+        await update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), {
+            units: myBoardData,
+            ready: true
+        });
+        
+        // 2. Tải đội hình đối thủ
+        // Lưu ý: Host cần đội hình Guest để tính logic. Guest cần đội hình Host để hiển thị visual.
+        const enemyRef = ref(this.db, `matches/${this.matchId}/boards/${this.opponentId}`);
+        let found = false;
+        
+        const onData = (snap) => {
+            const data = snap.val();
+            if (data && data.ready && !found) {
+                found = true;
+                off(enemyRef, 'value', onData); 
+                this.spawnEnemyFromData(data.units);
+            }
+        };
+        onValue(enemyRef, onData);
+        
+        // Timeout nếu đối thủ lag quá 10s
+        setTimeout(() => {
+            if (!found) {
+                found = true;
+                off(enemyRef, 'value', onData);
+                this.view.toast("Đối thủ mất kết nối! Đấu với Bot.");
+                this.spawnBotFallback(); 
+            }
+        }, 10000);
+    }
+
+    spawnEnemyFromData(unitsData) {
+        if(!unitsData) return;
+        this.view.toast(this.role === 'host' ? "PVP: TÍNH TOÁN LOGIC..." : "PVP: ĐỒNG BỘ VISUAL...");
+        
+        // Host sinh unit địch là 'g_' (Guest), Guest sinh unit địch là 'h_' (Host)
+        const enemyPrefix = (this.role === 'host') ? 'g_' : 'h_';
+
+        unitsData.forEach((ud, i) => {
+            const champData = CHAMPS.find(c => c.id === ud.id);
+            if (champData) {
+                const mirrorIdx = 55 - ud.hexIdx; // Đối xứng qua tâm
+                const spawnHex = this.hexes[mirrorIdx];
+                if (spawnHex) {
+                    const enemy = this.createUnit(champData, spawnHex, 'enemy');
+                    enemy.star = 1; for(let s=1; s<ud.star; s++) enemy.upgradeStar();
+                    enemy.items = ud.items || []; 
+                    enemy.updateStats();
+                    
+                    enemy.netId = `${enemyPrefix}${i}`;
+                    this.netUnits[enemy.netId] = enemy;
                 }
-            };
-            onValue(enemyRef, onData);
-            
-            setTimeout(() => {
-                if (!found) {
-                    found = true;
-                    off(enemyRef, 'value', onData);
-                    this.view.toast("Đối thủ mất kết nối! Đấu với Bot.");
-                    this.spawnBotFallback(); 
-                }
-            }, 8000);
-        } else {
-            this.spawnBotFallback();
-        }
+            }
+        });
+        
+        this.isPvpLoading = false; 
     }
 
     spawnBotFallback() {
-        this.view.toast("PVP START (vs BOT)!");
+        this.view.toast("ĐẤU TẬP (BOT)");
         const enemyHexes = this.hexes.filter(h => !h.userData.isPlayer && !h.userData.occupied);
         const shuffledHexes = enemyHexes.sort(() => 0.5 - Math.random());
         let botLvl = Math.min(this.stage + 2, 9);
@@ -386,25 +502,16 @@ export class GameManager {
             if(shuffledHexes[i]) {
                 const botUnitData = this.rollChamp(botLvl);
                 const enemy = this.createUnit(botUnitData, shuffledHexes[i], 'enemy');
-                const r = Math.random();
-                let targetStar = 1;
-                if (this.stage >= 3) { if (r < 0.3) targetStar = 2; }
-                if (this.stage >= 5) { if (r < 0.6) targetStar = 2; else if (r > 0.9) targetStar = 3; }
-                for(let s=1; s < targetStar; s++) enemy.upgradeStar();
-                if (this.stage >= 3 && Math.random() > 0.5) {
-                    const itemKeys = Object.keys(ITEMS);
-                    enemy.addItem(itemKeys[Math.floor(Math.random()*itemKeys.length)]);
-                }
-                enemy.hp = enemy.maxHp; 
-                enemy.updateBar();
+                enemy.hp = enemy.maxHp; enemy.updateBar();
             }
         }
         this.isPvpLoading = false; 
     }
 
+    // HOST ONLY: Gửi vị trí tất cả unit lên Firebase
     syncHostToGuest(dt) {
         this.syncTimer += dt;
-        if (this.syncTimer < 0.05) return;
+        if (this.syncTimer < 0.05) return; // 20 lần/giây
         this.syncTimer = 0;
 
         const syncData = {};
@@ -419,13 +526,17 @@ export class GameManager {
             };
         });
 
+        // Fire & Forget (không await để tránh lag loop)
         update(ref(this.db, `matches/${this.matchId}/sync`), syncData);
     }
 
+    // GUEST ONLY: Nhận vị trí và cập nhật visual
     listenToCombatSync() {
         if (this.role !== 'guest') return;
         
-        this.syncListener = onValue(ref(this.db, `matches/${this.matchId}/sync`), (snap) => {
+        // Lưu reference để off() khi hết combat
+        this.syncListenerRef = ref(this.db, `matches/${this.matchId}/sync`);
+        this.syncListener = onValue(this.syncListenerRef, (snap) => {
             const data = snap.val();
             if (!data) return;
 
@@ -433,6 +544,7 @@ export class GameManager {
                 const u = this.netUnits[netId];
                 if (u) {
                     u.targetSync = data[netId];
+                    // Cập nhật chỉ số ngay lập tức
                     u.hp = data[netId].hp;
                     u.mana = data[netId].m;
                     u.updateBar();
@@ -448,54 +560,68 @@ export class GameManager {
     }
 
     updateGuestVisuals(dt) {
+        // Guest nội suy (Lerp) vị trí unit để mượt mà
         this.units.forEach(u => {
             if (u.targetSync) {
+                // Host gửi tọa độ gốc. Guest phải lật ngược lại (Mirror) để hiển thị đúng góc nhìn của mình
+                // Vì bàn cờ Guest đối xứng với Host qua tâm (0,0)
                 let tx = u.targetSync.x;
                 let tz = u.targetSync.z;
                 let tr = u.targetSync.r;
 
+                // Công thức Mirror
                 tx = -tx; 
                 tz = -tz; 
                 tr = tr + Math.PI;
 
                 u.group.position.x += (tx - u.group.position.x) * 15 * dt;
                 u.group.position.z += (tz - u.group.position.z) * 15 * dt;
-                
                 u.group.rotation.y = tr;
                 
+                // Animation chạy tại chỗ để visual đẹp
                 u.updateAnimation(performance.now() * 0.001); 
             }
         });
     }
 
-    endCombat(win) {
-        if (this.syncListener) {
-            this.syncListener();
-            this.syncListener = null;
+    endCombat(win, forceReset = false) {
+        if (this.syncListenerRef) {
+            off(this.syncListenerRef); // Ngắt lắng nghe sync vị trí
+            this.syncListenerRef = null;
         }
 
-        if(win) { this.ehp-=10; this.view.toast("CHIẾN THẮNG!"); } 
-        else { 
-            this.php-=10; this.view.toast("THẤT BẠI!"); 
+        if (forceReset) {
+            // Trường hợp Guest bị force end từ Host
+            // Tính toán win/loss dựa trên tham số truyền vào hoặc mặc định
+        } else {
+            // Logic tính máu thông thường
+            if(win === true) { this.ehp-=10; } 
+            else if (win === false) { this.php-=10; }
         }
 
+        // PVP: Xử lý kết quả trận đấu
         if (this.mode === 'pvp') {
             this.isWaiting = true;
             this.pendingResult = win;
             
+            // HOST ONLY: Ghi kết quả lên DB để Guest đọc
             if (this.role === 'host') {
                 update(ref(this.db, `matches/${this.matchId}/result`), {
-                    winner: win ? this.myId : this.opponentId,
+                    winner: win ? this.myId : this.opponentId, // Nếu Host thắng -> Host ID, nếu thua -> Opp ID
+                    round: `${this.stage}-${this.subRound}`,
                     timestamp: Date.now()
                 });
+                
+                // Host tự finalize luôn
+                this.finalizeRound(win);
             }
-
-            this.view.toast("Đang đồng bộ kết quả...");
+            
+            // Cập nhật máu của mình lên DB để đối thủ thấy
             update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { 
                 hp: this.php,
-                finished: true 
             });
         } else {
+            // PVE
             this.finalizeRound(win);
         }
     }
@@ -503,22 +629,40 @@ export class GameManager {
     finalizeRound(win) {
         this.isWaiting = false; 
         
+        this.streakManager.updateState(win);
+        const streakBonus = this.streakManager.getBonusGold();
+        const winBonus = (win === true) ? 1 : 0;
+        
+        let msg = (win === true) ? "CHIẾN THẮNG!" : ((win === false) ? "THẤT BẠI!" : "HÒA!");
+        if (streakBonus > 0) msg += ` (Chuỗi +${streakBonus}g)`;
+        this.view.toast(msg);
+        this.streakManager.render();
+
+        // Reset trạng thái sẵn sàng cho round sau
         if(this.mode === 'pvp') {
-            update(ref(this.db, `matches/${this.matchId}/states/${this.myId}`), { finished: false });
             update(ref(this.db, `matches/${this.matchId}/boards/${this.myId}`), { ready: false });
             if(this.role === 'host') {
-                update(ref(this.db, `matches/${this.matchId}/sync`), null);
+                update(ref(this.db, `matches/${this.matchId}/sync`), null); // Clear data sync cũ
             }
         }
 
+        // Kiểm tra chết
         if(this.php<=0 || this.ehp<=0) { 
             document.getElementById('game-over').classList.remove('hidden'); 
             const result = this.php > this.ehp ? "THẮNG" : "THUA"; 
             document.getElementById('end-title').innerText = `${result} (HP: ${this.php} vs ${this.ehp})`; 
             this.isGameStarted = false; 
+            
+            // Clear Firebase data trận này để tiết kiệm
+            if(this.role === 'host') {
+                setTimeout(() => {
+                    remove(ref(this.db, `matches/${this.matchId}`));
+                }, 5000);
+            }
             return; 
         }
 
+        // Reset game loop
         this.phase = 'prep';
         this.timer = TIMERS.PREP; 
         this.updateUIPhase(false);
@@ -528,16 +672,20 @@ export class GameManager {
         if(this.subRound > 6) { this.subRound = 1; this.stage++; this.view.toast(`LÊN STAGE ${this.stage}!`); }
         this.checkAugmentRound();
         
+        // Cộng vàng
         const maxInterest = this.augments.find(a => a.id === 'rich_get_richer') ? 7 : 5;
         const interest = Math.min(Math.floor(this.gold / 10), maxInterest); 
-        this.gold += (5 + interest + (win?1:0)); this.xp += 2;
+        this.gold += (5 + interest + winBonus + streakBonus); 
+        this.xp += 2;
         
+        // Reset Units
         this.units.forEach(u => { if(u.team==='player') u.reset(); else u.destroy(); }); 
         this.units = this.units.filter(u=>u.team==='player');
         
         if(this.xp >= this.getXpNeed()) { this.xp-=this.getXpNeed(); this.lvl++; }
         if(!this.isShopLocked) this.refreshShop();
         this.view.updateUI();
+        this.streakManager.render();
     }
 
     updateUIPhase(isCombat) {
@@ -546,6 +694,7 @@ export class GameManager {
         if(isCombat) { this.view.targetPos = this.view.zoomLevels[2].pos.clone(); this.view.targetLook = this.view.zoomLevels[2].look.clone(); }
     }
 
+    // --- CÁC HÀM AUGMENT & INTERACTION (Giữ nguyên) ---
     createAugmentPillar3D() {
         this.pillarGroup = new THREE.Group();
         this.pillarGroup.position.set(-15, 0, 0); 
@@ -699,35 +848,6 @@ export class GameManager {
 
     serializeBoard(units) { return units.map(u => { const hex = u.group.children.find(c=>c.name==='hitbox').userData.hex; const hexIdx = this.hexes.indexOf(hex); return { id: u.data.id, star: u.star, items: u.items, hexIdx: hexIdx }; }); }
     
-    spawnEnemyFromData(unitsData) {
-        if(!unitsData) return;
-        this.view.toast(this.role === 'host' ? "PVP START (HOST)" : "PVP START (SPECTATING)");
-        
-        const prefix = (this.mode === 'pvp' && this.role === 'host') ? 'g_' : 'h_';
-
-        unitsData.forEach((ud, i) => {
-            const champData = CHAMPS.find(c => c.id === ud.id);
-            if (champData) {
-                const mirrorIdx = 55 - ud.hexIdx;
-                const spawnHex = this.hexes[mirrorIdx];
-                if (spawnHex) {
-                    const enemy = this.createUnit(champData, spawnHex, 'enemy');
-                    enemy.star = 1; for(let s=1; s<ud.star; s++) enemy.upgradeStar();
-                    enemy.items = ud.items || []; enemy.updateStats();
-                    
-                    enemy.netId = `${prefix}${i}`;
-                    this.netUnits[enemy.netId] = enemy;
-                }
-            }
-        });
-        
-        this.isPvpLoading = false; 
-        
-        if (this.role === 'guest') {
-            this.listenToCombatSync();
-        }
-    }
-
     initInput() {
         const handler = (e) => this.handleInput(e);
         const opts = { passive: false }; 
@@ -743,14 +863,10 @@ export class GameManager {
         
         const closeAug = document.getElementById('btn-close-aug');
         const augModal = document.getElementById('augment-modal');
-        
         if(closeAug) closeAug.onclick = () => { augModal.classList.add('hidden'); };
-
         if (augModal) {
             augModal.addEventListener('mousedown', (e) => {
-                if (e.target === augModal && !closeAug.classList.contains('hidden')) {
-                    augModal.classList.add('hidden');
-                }
+                if (e.target === augModal && !closeAug.classList.contains('hidden')) { augModal.classList.add('hidden'); }
             });
         }
     }
@@ -785,32 +901,6 @@ export class GameManager {
         this.mouse.x = (x / rect.width) * 2 - 1;
         this.mouse.y = -(y / rect.height) * 2 + 1;
         this.ray.setFromCamera(this.mouse, this.view.camera); 
-    }
-
-    listenMatchState() { 
-        onValue(ref(this.db, `matches/${this.matchId}/states`), (snap) => {
-            const states = snap.val();
-            if (!states) return;
-
-            const oppState = states[this.opponentId];
-            if (oppState && oppState.hp !== undefined) {
-                this.ehp = oppState.hp;
-                this.view.updateUI();
-            }
-            
-            const resultRef = ref(this.db, `matches/${this.matchId}/result`);
-            get(resultRef).then(resSnap => {
-                 const res = resSnap.val();
-                 if (res && this.isWaiting) {
-                     const amIWinner = res.winner === this.myId;
-                     this.finalizeRound(amIWinner);
-                 }
-            });
-
-            const myState = states[this.myId];
-            if (this.isWaiting && myState?.finished && oppState?.finished) {
-            }
-        }); 
     }
 
     onDown(e) {

@@ -27,7 +27,7 @@ if (!currentUserId) {
     localStorage.setItem('tft_uid', currentUserId);
 }
 
-// Hàm lưu settings (để logic.js gọi)
+// Hàm lưu settings
 window.saveUserSettings = (newSettings) => {
     userSettings = { ...userSettings, ...newSettings };
     localStorage.setItem('tft_settings', JSON.stringify(userSettings));
@@ -43,17 +43,18 @@ function loadUserData() {
         try { userSettings = JSON.parse(storedSettings); } catch(e){}
     }
     
-    document.getElementById('lobby-username').innerText = currentUserName;
-    document.getElementById('input-player-name').value = currentUserName;
+    const nameDisplay = document.getElementById('lobby-username');
+    if(nameDisplay) nameDisplay.innerText = currentUserName;
+    
+    const inputName = document.getElementById('input-player-name');
+    if(inputName) inputName.value = currentUserName;
 
-    // Apply settings UI ngay lập tức nếu cần
     if (userSettings.uiScale) {
         document.documentElement.style.setProperty('--ui-scale', userSettings.uiScale);
     }
 }
 
 // 3. Logic Ghép Trận (Matchmaking)
-const MATCH_TIMEOUT = 30000; // 30s
 let isSearching = false;
 let searchInterval = null;
 
@@ -79,7 +80,6 @@ function findMatch() {
     btnPvp.classList.add('disabled');
 
     const queueRef = ref(db, 'queue');
-    const matchRef = ref(db, 'matches');
 
     // Thêm mình vào hàng chờ
     const myEntry = { id: currentUserId, name: currentUserName, time: Date.now() };
@@ -89,7 +89,7 @@ function findMatch() {
     let checkCount = 0;
     searchInterval = setInterval(async () => {
         checkCount++;
-        if(checkCount > 10) { // Timeout sau 10 lần check (khoảng 20s)
+        if(checkCount > 15) { // Tăng thời gian timeout lên chút (30s)
             stopSearching(originalText, "Không tìm thấy đối thủ!");
             return;
         }
@@ -99,17 +99,17 @@ function findMatch() {
         
         if (queue) {
             const keys = Object.keys(queue);
-            // Nếu có người khác trong hàng chờ (không phải mình)
+            // Tìm đối thủ khác mình
             const opponentKey = keys.find(k => k !== currentUserId);
             
             if (opponentKey) {
-                // TÌM THẤY!
                 const opponent = queue[opponentKey];
                 
-                // Xóa cả 2 khỏi queue để tránh người khác ghép trùng
+                // Xóa cả 2 khỏi queue ngay lập tức
                 await remove(child(queueRef, currentUserId));
                 await remove(child(queueRef, opponentKey));
                 
+                // Gọi tạo trận
                 createMatch(currentUserId, opponentKey, opponent.name);
                 clearInterval(searchInterval);
             }
@@ -129,58 +129,77 @@ function stopSearching(origText, msg) {
     if(msg) alert(msg);
 }
 
-async function createMatch(hostId, guestId, guestName) {
+// UPDATE QUAN TRỌNG: Random Host để công bằng và tránh lỗi fix cứng
+async function createMatch(playerA_Id, playerB_Id, playerB_Name) {
     const matchId = `match_${Date.now()}_${Math.floor(Math.random()*1000)}`;
     
+    // Tung đồng xu để chọn Host (người cầm cái)
+    const isA_Host = Math.random() > 0.5;
+    
+    const hostId = isA_Host ? playerA_Id : playerB_Id;
+    const guestId = isA_Host ? playerB_Id : playerA_Id;
+    
+    const hostName = isA_Host ? currentUserName : playerB_Name;
+    const guestName = isA_Host ? playerB_Name : currentUserName;
+
     const matchData = {
         host: hostId,
         guest: guestId,
-        hostName: currentUserName,
+        hostName: hostName,
         guestName: guestName,
         status: 'active',
-        created: Date.now()
+        created: Date.now(),
+        // Khởi tạo trạng thái toàn cục để Logic.js dùng
+        globalState: {
+            phase: 'prep',
+            stage: 1,
+            subRound: 1,
+            timerStart: Date.now() + 5000 // Buffer 5s để cả 2 load game
+        }
     };
     
-    // Tạo match mới
+    // Tạo match
     await set(ref(db, `matches/${matchId}`), matchData);
     
-    // Gửi tín hiệu mời cho Guest (thông qua user-match-mapping hoặc listen queue cũ - ở đây làm đơn giản là Host tự vào, Guest listen ở đâu đó?)
-    // Cách đơn giản: Host tự tạo record 'invite' cho Guest
-    // Tuy nhiên để đơn giản hoá project này: Ta sẽ dùng cơ chế 'signal'
-    // Hoặc Host update trạng thái 'matched' vào queue của Guest (phức tạp).
-    
-    // CÁCH TỐI ƯU CHO DEMO:
-    // Host set matchId vào node 'active_games' cho cả 2 user
-    update(ref(db, `users/${hostId}`), { currentMatch: matchId, role: 'host' });
-    update(ref(db, `users/${guestId}`), { currentMatch: matchId, role: 'guest' });
+    // Update trạng thái cho cả 2 user để trigger vào game
+    update(ref(db, `users/${playerA_Id}`), { currentMatch: matchId, role: isA_Host ? 'host' : 'guest' });
+    update(ref(db, `users/${playerB_Id}`), { currentMatch: matchId, role: isA_Host ? 'guest' : 'host' });
 
-    enterGame({ mode: 'pvp', matchId: matchId, role: 'host', opponentId: guestId, db: db });
+    // Vào game ngay cho người tạo (người kia sẽ listen)
+    const myRole = isA_Host ? 'host' : 'guest';
+    const oppId = isA_Host ? playerB_Id : playerA_Id;
+    
+    enterGame({ mode: 'pvp', matchId: matchId, role: myRole, opponentId: oppId, db: db });
 }
 
-// Lắng nghe xem mình có được ghép trận không (Dành cho người đến sau - Guest)
 function listenForMatch() {
     const userRef = ref(db, `users/${currentUserId}`);
     onValue(userRef, (snapshot) => {
         const data = snapshot.val();
         if (data && data.currentMatch) {
-            // Đã được ghép!
-            // Xóa info để tránh trigger lại lần sau
-            update(userRef, { currentMatch: null });
+            update(userRef, { currentMatch: null }); // Clear signal
             
-            // Vào game
-            enterGame({ 
-                mode: 'pvp', 
-                matchId: data.currentMatch, 
-                role: data.role, 
-                opponentId: 'unknown', // Guest sẽ lấy ID đối thủ từ match info sau
-                db: db 
+            // Tìm ID đối thủ (cần thiết để load board sau này)
+            // Vì ta chưa biết đối thủ là ai ở client Guest, ta sẽ lấy từ Match Info sau trong logic.js
+            // Hoặc truyền tạm 'unknown' và để logic.js fetch lại.
+            // Để an toàn, ta sẽ fetch match info nhanh ở đây:
+            get(ref(db, `matches/${data.currentMatch}`)).then(mSnap => {
+                const mData = mSnap.val();
+                if(mData) {
+                    const opponentId = (data.role === 'host') ? mData.guest : mData.host;
+                    enterGame({ 
+                        mode: 'pvp', 
+                        matchId: data.currentMatch, 
+                        role: data.role, 
+                        opponentId: opponentId, 
+                        db: db 
+                    });
+                }
             });
         }
     });
 }
-// Kích hoạt lắng nghe ngay khi vào lobby
 listenForMatch();
-
 
 function enterGame(gameConfig) {
     const lobby = document.getElementById('lobby-screen');
@@ -191,13 +210,10 @@ function enterGame(gameConfig) {
         lobby.classList.add('hidden');
         gameUI.classList.remove('hidden');
         
-        // Hiện nút bán khi vào game
         const sell = document.getElementById('sell-slot');
         if(sell) sell.classList.remove('hidden');
         
-        // Gọi hàm start game và TRUYỀN SETTINGS + CONFIG PVP
         if (window.initTFTGame) {
-            // Merge settings UI và config Game
             const fullConfig = { 
                 ...window.userSettings, 
                 ...gameConfig, 
@@ -209,25 +225,19 @@ function enterGame(gameConfig) {
     }, 500);
 }
 
-// Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
     loadUserData();
 
-    // --- CẬP NHẬT: LOGIC NÚT GLOBAL FULLSCREEN ---
-    // Vì nút này nằm ngoài lobby, ta gán sự kiện ngay tại đây để dùng được luôn
     const btnFs = document.getElementById('btn-global-fullscreen');
     if (btnFs) {
         btnFs.onclick = () => {
             if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(err => {
-                    console.log(`Error: ${err.message}`);
-                });
+                document.documentElement.requestFullscreen().catch(err => console.log(err));
             } else {
                 if (document.exitFullscreen) document.exitFullscreen();
             }
         };
     }
-    // ---------------------------------------------
 
     const profileBox = document.getElementById('user-profile-box');
     const nameInput = document.getElementById('input-player-name');
@@ -238,20 +248,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnPlay = document.getElementById('btn-lobby-play');
     const modeSelectModal = document.getElementById('mode-select-modal');
-    if(btnPlay) btnPlay.onclick = () => {
-        if(modeSelectModal) modeSelectModal.classList.remove('hidden');
-    };
+    if(btnPlay) btnPlay.onclick = () => { if(modeSelectModal) modeSelectModal.classList.remove('hidden'); };
 
     if(modeSelectModal) {
-        modeSelectModal.onclick = (e) => {
-            if (e.target === modeSelectModal) modeSelectModal.classList.add('hidden');
-        };
+        modeSelectModal.onclick = (e) => { if (e.target === modeSelectModal) modeSelectModal.classList.add('hidden'); };
     }
 
     const btnPve = document.getElementById('btn-mode-pve');
     if(btnPve) btnPve.onclick = () => enterGame({ mode: 'pve' });
 
-    // Enable nút PvP
     const btnPvp = document.getElementById('btn-mode-pvp');
     if(btnPvp) {
         btnPvp.classList.remove('disabled');
