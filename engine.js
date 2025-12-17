@@ -248,8 +248,6 @@ export class Unit {
         
         if (this.stunTime > 0) {
             this.visuals.forEach(mesh => { if(mesh.material) mesh.material.emissive.setHex(0x0000ff); });
-        } else {
-             // Reset logic if needed
         }
 
         if (this.atkAnimTimer > 0) {
@@ -392,10 +390,12 @@ export class ViewManager {
         this.gm = gm;
         this.scene = null; this.camera = null; this.renderer = null;
         this.dragPlane = null;
-        this.zoomLevels = [ { pos: new THREE.Vector3(0, 22, 16), look: new THREE.Vector3(0, 0, 2) }, { pos: new THREE.Vector3(0, 16, 12), look: new THREE.Vector3(0, 0, 1) }, { pos: new THREE.Vector3(0, 10, 8),  look: new THREE.Vector3(0, 0, 0) } ];
-        this.zoomIdx = 1;
-        this.targetPos = this.zoomLevels[1].pos.clone();
-        this.targetLook = this.zoomLevels[1].look.clone();
+        this.zoomLevels = [ { pos: new THREE.Vector3(0, 22, 16), look: new THREE.Vector3(0, 0, 2) }, { pos: new THREE.Vector3(0, 12, 8), look: new THREE.Vector3(0, 0, 1) }, { pos: new THREE.Vector3(0, 10, 8),  look: new THREE.Vector3(0, 0, 0) } ];
+        
+        // CẬP NHẬT: Luôn luôn là góc nhìn gần (Index 2)
+        this.zoomIdx = 2;
+        this.targetPos = this.zoomLevels[this.zoomIdx].pos.clone();
+        this.targetLook = this.zoomLevels[this.zoomIdx].look.clone();
         this.currLook = this.targetLook.clone();
     }
 
@@ -405,17 +405,13 @@ export class ViewManager {
         this.scene.fog = new THREE.Fog(0x202025, 20, 60);
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
         
+        // Chỉ đọc UI Scale, không đọc Zoom Index nữa
         if (this.gm.settings) {
             if (this.gm.settings.uiScale) {
                 document.documentElement.style.setProperty('--ui-scale', this.gm.settings.uiScale);
                 const slider = document.getElementById('ui-scale-slider');
                 const text = document.getElementById('ui-scale-text');
                 if(slider && text) { const pct = Math.round(this.gm.settings.uiScale * 50); slider.value = pct + "%"; }
-            }
-            if (this.gm.settings.zoomIdx !== undefined) {
-                this.zoomIdx = this.gm.settings.zoomIdx;
-                this.targetPos = this.zoomLevels[this.zoomIdx].pos.clone();
-                this.targetLook = this.zoomLevels[this.zoomIdx].look.clone();
             }
         }
 
@@ -485,10 +481,7 @@ export class ViewManager {
 
         bind('btn-lobby-play', 'onclick', () => { });
         bind('btn-refresh', 'onclick', () => { if(this.gm.gold>=2){this.gm.gold-=2; this.gm.refreshShop(); this.updateUI();} });
-        
-        // CẬP NHẬT: Dùng hàm buyXP chung cho nút bấm
         bind('btn-buy-xp', 'onclick', () => { this.gm.buyXP(); });
-        
         bind('btn-shop-toggle', 'onclick', () => { const shp = get('shop-wrapper'); if(shp) shp.classList.toggle('hidden'); });
         bind('btn-restart', 'onclick', () => location.reload());
         bind('btn-close-inspector', 'onclick', () => this.closeInspector());
@@ -506,7 +499,7 @@ export class ViewManager {
             };
         }
 
-        // MỚI: Xử lý checkbox PC Mode
+        // Xử lý checkbox PC Mode
         const pcCheck = get('pc-mode-check');
         if(pcCheck) {
             // Set trạng thái ban đầu
@@ -534,11 +527,8 @@ export class ViewManager {
             tabSyn.onclick = () => { tabSyn.classList.add('active'); tabInv.classList.remove('active'); get('content-syn').classList.remove('hidden'); get('content-inv').classList.add('hidden'); };
             tabInv.onclick = () => { tabInv.classList.add('active'); tabSyn.classList.remove('active'); get('content-inv').classList.remove('hidden'); get('content-syn').classList.add('hidden'); };
         }
-        const btnZoom = document.querySelector('.action-btn.zoom');
-        if(btnZoom) { 
-            const handler = (e) => { e.stopPropagation(); this.toggleZoom(); if(window.saveUserSettings) window.saveUserSettings({ zoomIdx: this.zoomIdx }); };
-            btnZoom.onclick = handler; btnZoom.ontouchstart = handler; 
-        }
+        
+        // Đã xóa nút Zoom listener
     }
 
     updateUI() {

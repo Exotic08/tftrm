@@ -1,11 +1,80 @@
-import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS, SeededRNG } from './shared.js';
+import { CHAMPS, SYNERGIES, XP_TO_LEVEL, SHOP_ODDS, MONSTERS, PVE_ROUNDS, ITEMS, RECIPES, AUGMENTS, AUGMENT_ROUNDS, TIMERS, SeededRNG, STATS } from './shared.js';
 import { Unit, ViewManager } from './engine.js';
 import { UnitFactory } from './3d.js'; 
 import { ref, update, onValue, set, off, get } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
 
 // Cấu hình Fixed Time Step
-const FIXED_TIME_STEP = 1 / 30; // Logic chạy 30 lần/giây (0.0333s)
-const MAX_FRAME_TIME = 0.25; // Giới hạn để tránh lag giật khi tab không active
+const FIXED_TIME_STEP = 1 / 30; 
+const MAX_FRAME_TIME = 0.25; 
+
+// --- CLASS TRÍ TUỆ NHÂN TẠO (UTILITY AI) ---
+class BotBrain {
+    constructor(gm) {
+        this.gm = gm;
+        this.metaComps = [
+            { name: 'Warriors', traits: ['warrior'], carries: ['yasuo', 'riven'], tanks: ['garen', 'darius'] },
+            { name: 'Rangers', traits: ['ranger', 'tank'], carries: ['jhin', 'ashe'], tanks: ['braum', 'leo'] },
+            { name: 'Mages', traits: ['mage', 'tank'], carries: ['velkoz', 'lux'], tanks: ['annie', 'malph'] },
+            { name: 'Assassins', traits: ['assassin'], carries: ['talon', 'kat'], tanks: ['zed', 'noc'] }
+        ];
+    }
+
+    generateSquad(stage) {
+        const stratIdx = Math.floor(this.gm.shopRNG.next() * this.metaComps.length);
+        const strat = this.metaComps[stratIdx];
+        
+        let budget = 4 + Math.pow(stage, 2.5) * 3; 
+        
+        let level = Math.min(9, stage + 1);
+        if (stage >= 3) level = Math.min(9, stage + 2);
+
+        let squad = [];
+        const pool = CHAMPS.filter(c => strat.traits.includes(c.trait) || (c.cost >= 4 && this.gm.shopRNG.next() > 0.7));
+
+        while (squad.length < level && budget > 0) {
+            const candidate = pool[Math.floor(this.gm.shopRNG.next() * pool.length)];
+            let star = 1;
+            const starRoll = this.gm.shopRNG.next();
+            if (stage >= 3 && starRoll < 0.4) star = 2; 
+            if (stage >= 5 && starRoll < 0.7) star = 2; 
+            if (stage >= 5 && starRoll < 0.15) star = 3; 
+
+            const unitValue = candidate.cost * Math.pow(3, star - 1);
+
+            if (budget >= unitValue) {
+                const count = squad.filter(u => u.id === candidate.id).length;
+                const isCarry = strat.carries.includes(candidate.id);
+                if (count === 0 || (isCarry && count < 2)) {
+                    budget -= unitValue;
+                    squad.push({ ...candidate, star: star });
+                }
+            } else {
+                if (this.gm.shopRNG.next() > 0.9) break; 
+            }
+        }
+
+        let itemCount = Math.max(0, stage - 1);
+        if (stage > 4) itemCount += 2;
+
+        const components = Object.keys(ITEMS).filter(k => ITEMS[k].isComponent);
+        const completed = Object.keys(ITEMS).filter(k => !ITEMS[k].isComponent);
+
+        for (let i = 0; i < itemCount; i++) {
+            const carry = squad.find(u => strat.carries.includes(u.id) && (!u.items || u.items.length < 3));
+            const tank = squad.find(u => strat.tanks.includes(u.id) && (!u.items || u.items.length < 3));
+            
+            const target = carry || tank || squad[0];
+            if (target) {
+                if (!target.items) target.items = [];
+                const itemPool = (stage >= 3) ? completed : components;
+                const item = itemPool[Math.floor(this.gm.shopRNG.next() * itemPool.length)];
+                target.items.push(item);
+            }
+        }
+
+        return { squad, strat };
+    }
+}
 
 function createIconTexture(text, color) {
     const canvas = document.createElement('canvas');
@@ -53,16 +122,17 @@ export class GameManager {
     constructor(settings) {
         this.settings = settings || {};
         this.mode = this.settings.mode || 'pve'; 
-        this.pcMode = this.settings.pcMode || false; // MỚI: Check chế độ PC
+        this.pcMode = this.settings.pcMode || false; 
         
         this.db = this.settings.db;
         this.matchId = this.settings.matchId;
         this.myId = this.settings.myId || 'local_player';
         this.opponentId = this.settings.opponentId;
 
-        // --- RNG SETUP ---
         this.shopRNG = new SeededRNG(this.myId);
         this.combatRNG = null;
+        
+        this.botBrain = new BotBrain(this); 
 
         this.units = []; this.hexes = []; this.interestOrbs = [];
         this.vfxList = []; this.projList = [];
@@ -82,6 +152,9 @@ export class GameManager {
         const randomStartItem = components[Math.floor(this.shopRNG.next() * components.length)];
         this.inventory = [randomStartItem];
 
+        // Lưu item khởi đầu vào collection
+        this.saveToCollection('items', randomStartItem);
+
         this.augments = []; this.augmentPool = [...AUGMENTS]; 
         this.pillarGroup = null; this.pillarIcons = [];
 
@@ -91,7 +164,6 @@ export class GameManager {
         this.dragItem = null; this.dragItemEl = null;
         this.ray = new THREE.Raycaster(); this.mouse = new THREE.Vector2();
         
-        // MỚI: Theo dõi vị trí chuột cho phím E (Bán nhanh)
         this.lastMouseX = 0;
         this.lastMouseY = 0;
 
@@ -111,6 +183,17 @@ export class GameManager {
             this.lastTime = performance.now();
             this.loop(); 
         } catch(e) { console.error("Game Init Error:", e); alert("Lỗi: " + e.message); }
+    }
+
+    // --- MỚI: HÀM LƯU BỘ SƯU TẬP ---
+    saveToCollection(type, id) {
+        // type: 'champions' | 'items'
+        if (!this.db || !this.myId) return;
+        const path = `users/${this.myId}/collection/${type}`;
+        const updates = {};
+        updates[id] = true;
+        // Dùng update để không ghi đè dữ liệu cũ
+        update(ref(this.db, path), updates).catch(err => console.error("Lỗi lưu collection:", err));
     }
 
     loop() {
@@ -245,15 +328,19 @@ export class GameManager {
         if(this.gold < data.cost) { this.view.toast("Không đủ vàng!"); return false; }
         const benchHex = this.hexes.find(h => h.userData.isPlayer && h.userData.isBench && !h.userData.occupied);
         if(!benchHex) { this.view.toast("Hàng chờ đầy!"); return false; }
+        
         this.gold -= data.cost;
         const newUnit = this.createUnit(data, benchHex, 'player');
+        
+        // --- MỚI: LƯU VÀO COLLECTION ---
+        this.saveToCollection('champions', data.id);
+
         this.checkTriple(newUnit);
         this.calcSyn();
         this.view.updateUI();
         return true;
     }
 
-    // MỚI: Hàm mua kinh nghiệm (Tách ra để dùng cho phím tắt)
     buyXP() {
         if (this.gold >= 4 && this.lvl < 9) {
             this.gold -= 4;
@@ -291,7 +378,6 @@ export class GameManager {
         }
     }
 
-    // MỚI: Hàm bán unit đang được trỏ chuột vào (cho phím E)
     sellHoveredUnit() {
         if (!this.pcMode) return;
         this.updateRay(this.lastMouseX, this.lastMouseY);
@@ -300,11 +386,10 @@ export class GameManager {
         
         if (unitHit) {
             const unit = this.units.find(u => u.group === unitHit.object.parent);
-            // Chỉ bán được tướng khi đang ở Prep phase hoặc tướng trên hàng chờ
             const isBench = unitHit.object.userData.hex.userData.isBench;
             if (this.phase === 'prep' || isBench) {
                 this.sellUnit(unitHit.object);
-                this.view.closeInspector(); // Đóng inspector nếu đang soi con đó
+                this.view.closeInspector(); 
             } else {
                 this.view.toast("Không thể bán khi đang chiến đấu!");
             }
@@ -439,27 +524,48 @@ export class GameManager {
     }
 
     spawnBotFallback() {
-        this.view.toast("PVP START (vs BOT)!");
+        this.view.toast("PVP START (vs SMART BOT)!");
+        
+        const { squad, strat } = this.botBrain.generateSquad(this.stage);
+        
+        console.log(`Bot Strategy: ${strat.name}`, squad);
+
         const enemyHexes = this.hexes.filter(h => !h.userData.isPlayer && !h.userData.occupied);
-        const shuffledHexes = enemyHexes.sort(() => 0.5 - this.shopRNG.next());
-        let botLvl = Math.min(this.stage + 2, 9);
-        for(let i=0; i < botLvl; i++) {
-            if(shuffledHexes[i]) {
-                const botUnitData = this.rollChamp(botLvl); 
-                const enemy = this.createUnit(botUnitData, shuffledHexes[i], 'enemy');
-                const r = this.shopRNG.next();
-                let targetStar = 1;
-                if (this.stage >= 3) { if (r < 0.3) targetStar = 2; }
-                if (this.stage >= 5) { if (r < 0.6) targetStar = 2; else if (r > 0.9) targetStar = 3; }
-                for(let s=1; s < targetStar; s++) enemy.upgradeStar();
-                if (this.stage >= 3 && this.shopRNG.next() > 0.5) {
-                    const itemKeys = Object.keys(ITEMS);
-                    enemy.addItem(itemKeys[Math.floor(this.shopRNG.next()*itemKeys.length)]);
+        
+        const tankSlots = enemyHexes.slice(14, 28); 
+        const backSlots = enemyHexes.slice(0, 14);  
+        
+        tankSlots.sort(() => Math.random() - 0.5);
+        backSlots.sort(() => Math.random() - 0.5);
+
+        squad.forEach(unitData => {
+            const stats = STATS[unitData.id];
+            let spawnHex;
+
+            if (stats.type === 'melee' && tankSlots.length > 0) {
+                spawnHex = tankSlots.pop();
+            } else if (backSlots.length > 0) {
+                spawnHex = backSlots.pop();
+            } else {
+                spawnHex = enemyHexes.find(h => !h.userData.occupied); 
+            }
+
+            if(spawnHex) {
+                const enemy = this.createUnit(unitData, spawnHex, 'enemy');
+                if(this.combatRNG) enemy.setRNG(this.combatRNG);
+                
+                enemy.star = 1; 
+                for(let i=1; i < unitData.star; i++) enemy.upgradeStar();
+                
+                if (unitData.items && unitData.items.length > 0) {
+                    unitData.items.forEach(itemId => enemy.addItem(itemId));
                 }
+
                 enemy.hp = enemy.maxHp; 
                 enemy.updateBar();
             }
-        }
+        });
+
         this.isPvpLoading = false; 
     }
 
@@ -646,7 +752,11 @@ export class GameManager {
                         const allItems = Object.keys(ITEMS);
                         const candidates = aug.id === 'secret_weapon' ? allItems.filter(k => ITEMS[k].isComponent) : allItems.filter(k => !ITEMS[k].isComponent);
                         const reward = candidates[Math.floor(this.shopRNG.next() * candidates.length)];
-                        if (this.inventory.length < 8) this.inventory.push(reward); else { this.gold += 5; this.view.toast("Túi đầy -> +5 vàng"); }
+                        if (this.inventory.length < 8) { 
+                            this.inventory.push(reward); 
+                            // --- MỚI: LƯU ITEM NẾU ĐƯỢC TẶNG ---
+                            this.saveToCollection('items', reward);
+                        } else { this.gold += 5; this.view.toast("Túi đầy -> +5 vàng"); }
                         this.view.renderInventory();
                     }
                 }
@@ -666,6 +776,10 @@ export class GameManager {
             const randomItem = componentKeys[Math.floor(this.shopRNG.next() * componentKeys.length)];
             if (this.inventory.length < 8) { 
                 this.inventory.push(randomItem); 
+                
+                // --- MỚI: LƯU ITEM NHẶT ĐƯỢC ---
+                this.saveToCollection('items', randomItem);
+                
                 this.view.renderInventory(); 
                 this.view.toast(`Nhặt được: ${ITEMS[randomItem].name}`); 
             } else { this.gold += 2; this.view.toast("Túi đầy: +2 vàng"); }
@@ -710,22 +824,28 @@ export class GameManager {
         window.addEventListener('touchmove', handler, opts);
         window.addEventListener('touchend', handler, opts);
         
-        // MỚI: Đăng ký sự kiện bàn phím
         window.addEventListener('keydown', (e) => this.handleKeyDown(e));
 
         const closeAug = document.getElementById('btn-close-aug');
         if(closeAug) closeAug.onclick = () => { document.getElementById('augment-modal').classList.add('hidden'); };
+
+        // MỚI: Click ra ngoài (overlay) để đóng bảng lõi
+        const augModal = document.getElementById('augment-modal');
+        if(augModal) {
+            augModal.onclick = (e) => {
+                if (e.target === augModal) {
+                    augModal.classList.add('hidden');
+                }
+            };
+        }
     }
     
-    // MỚI: Xử lý phím tắt PC Mode
     handleKeyDown(e) {
         if (!this.pcMode || !this.isGameStarted) return;
-        
-        // Không xử lý nếu đang nhập tên (mặc dù trong game không có input nào active ngoại trừ lúc đặt tên ở lobby)
         if (e.target.tagName === 'INPUT') return;
 
         switch(e.code) {
-            case 'KeyD': // Roll
+            case 'KeyD': 
                 if (this.gold >= 2) {
                     this.gold -= 2;
                     this.refreshShop();
@@ -734,10 +854,10 @@ export class GameManager {
                     this.view.toast("Không đủ vàng!");
                 }
                 break;
-            case 'KeyR': // Mua XP
+            case 'KeyR': 
                 this.buyXP();
                 break;
-            case 'KeyE': // Bán nhanh
+            case 'KeyE': 
                 this.sellHoveredUnit();
                 break;
         }
@@ -757,7 +877,6 @@ export class GameManager {
         
         if (cx === undefined || isNaN(cx)) return;
         
-        // Cập nhật vị trí chuột cuối cùng cho Raycaster (dùng cho phím E)
         this.lastMouseX = cx;
         this.lastMouseY = cy;
 
@@ -841,10 +960,20 @@ export class GameManager {
                 const u = this.units.find(unit => unit.group === unitHit.object.parent);
                 if(u) {
                     const itemId = this.inventory[this.dragItem];
-                    if(u.addItem(itemId)) {
+                    // --- MỚI: CAPTURE KẾT QUẢ ĐỂ LƯU ITEM ---
+                    const result = u.addItem(itemId);
+                    if(result) {
                          this.inventory.splice(this.dragItem, 1);
+                         
+                         this.saveToCollection('items', itemId); // Lưu đồ lẻ
+                         if (typeof result === 'string') {
+                             this.saveToCollection('items', result); // Lưu đồ ghép
+                             this.view.toast(`Ghép thành: ${ITEMS[result].name}`);
+                         } else {
+                             this.view.toast(`Đã trang bị: ${ITEMS[itemId].name}`);
+                         }
+                         
                          this.view.renderInventory();
-                         this.view.toast(`Đã trang bị: ${ITEMS[itemId].name}`);
                     } else { this.view.toast("Tướng đã đầy đồ!"); }
                 }
             }
@@ -946,7 +1075,6 @@ window.initTFTGame = (userSettings) => {
                 const text = document.getElementById('ui-scale-text');
                 if(slider && text) { const pct = Math.round(userSettings.uiScale * 50); slider.value = pct + "%"; }
             }
-            // MỚI: Áp dụng PC Mode nếu đang bật
             if (userSettings.pcMode) {
                 const shop = document.getElementById('shop-wrapper');
                 const check = document.getElementById('pc-mode-check');

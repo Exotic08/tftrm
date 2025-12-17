@@ -7,14 +7,12 @@
     --hextech: #0acde3; 
     --hextech-dark: #055861;
     --mana: #00a8ff; 
-    /* Giảm scale mặc định xuống một chút để vừa màn hình hơn */
     --ui-scale: 0.9; 
 }
 
 body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; user-select: none; touch-action: none; -webkit-tap-highlight-color: transparent; position: fixed; width: 100%; height: 100%; }
 .hidden { display: none !important; }
 
-/* ĐIỀU CHỈNH 1: Giảm kích thước cơ sở (clamp) để UI nhỏ lại tổng thể */
 html { font-size: calc(clamp(9px, 2.0vh, 14px) * var(--ui-scale)); overflow: hidden; }
 
 canvas { 
@@ -29,14 +27,14 @@ canvas {
     pointer-events: auto;
 }
 
-/* --- UI OVERLAY & MENU --- */
+/* --- UI OVERLAY --- */
 #ui-overlay { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; z-index: 1000; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); pointer-events: none; }
 #ui-overlay > * { pointer-events: auto; }
 
 #game-ui { position: absolute; inset: 0; pointer-events: none; z-index: 50; }
 
 /* --- TOOLTIPS --- */
-#item-tooltip { position: fixed; background: rgba(10, 15, 20, 0.95); border: 1px solid #777; border-radius: 6px; padding: 10px; pointer-events: none; z-index: 2000; display: flex; flex-direction: column; gap: 5px; min-width: 140px; max-width: 220px; box-shadow: 0 5px 20px rgba(0,0,0,0.8); backdrop-filter: blur(4px); transition: opacity 0.1s; }
+#item-tooltip { position: fixed; background: rgba(10, 15, 20, 0.95); border: 1px solid #777; border-radius: 6px; padding: 10px; pointer-events: none; z-index: 6000; display: flex; flex-direction: column; gap: 5px; min-width: 140px; max-width: 220px; box-shadow: 0 5px 20px rgba(0,0,0,0.8); backdrop-filter: blur(4px); transition: opacity 0.1s; }
 #tooltip-header { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #444; padding-bottom: 5px; }
 #tooltip-icon { width: 24px; height: 24px; display: flex; justify-content: center; align-items: center; background: #222; border-radius: 3px; border: 1px solid #555; font-size: 1.2rem; flex-shrink: 0; }
 #tooltip-name { color: var(--gold); font-weight: bold; font-size: 0.9rem; }
@@ -58,7 +56,6 @@ canvas {
 .refresh-btn { width: 2.8rem; background: rgba(34,34,34,0.9); border: 1px solid #666; color: var(--gold); font-weight: bold; cursor: pointer; font-size: 1.2rem; border-radius: 4px; display: flex; justify-content: center; align-items: center; transition: 0.1s; }
 .refresh-btn:hover { background: rgba(60,60,60,1); border-color: #999; }
 #btn-lock.active { border-color: #e74c3c; color: #e74c3c; background: rgba(231, 76, 60, 0.2); }
-/* ĐIỀU CHỈNH: Giảm nhẹ kích thước thẻ bài */
 .card { width: 4.2rem; height: 5.6rem; background: rgba(20,20,20,0.9); border-top: 3px solid #555; border-radius: 4px; cursor: pointer; position: relative; display: flex; flex-direction: column; transition: transform 0.1s; overflow: hidden; box-shadow: 0 2px 5px black; }
 .card:hover { transform: translateY(-3px); box-shadow: 0 5px 10px black; }
 .card.c1 { border-color: #888; } .card.c2 { border-color: var(--green); } .card.c3 { border-color: var(--blue); } .card.c4 { border-color: #a0f; } .card.c5 { border-color: var(--gold); }
@@ -225,24 +222,87 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px;
 .btn-primary { background: linear-gradient(180deg, #c8aa6e, #a08855); color: black; font-weight: bold; border: none; padding: 10px 30px; font-size: 1.1rem; cursor: pointer; border-radius: 4px; box-shadow: 0 4px 0 #6e5d3c; transition: 0.1s; }
 .btn-primary:active { transform: translateY(4px); box-shadow: none; }
 
-/* --- AUGMENT MODAL --- */
-#augment-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); z-index: 3500; display: flex; justify-content: center; align-items: center; backdrop-filter: blur(8px); pointer-events: auto; }
+/* --- AUGMENT MODAL (FIXED Z-INDEX) --- */
+#augment-modal { 
+    position: fixed; 
+    inset: 0; 
+    background: rgba(0, 0, 0, 0.9); 
+    z-index: 5000; /* CAO HƠN WORLD UI (2000) */
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    backdrop-filter: blur(8px); 
+    pointer-events: auto; 
+}
 #aug-modal-content { display: flex; flex-direction: column; align-items: center; gap: 30px; width: 100%; max-width: 1000px; padding: 20px; position: relative; }
 .aug-title { color: var(--hextech); font-size: 2.5rem; text-transform: uppercase; letter-spacing: 3px; text-shadow: 0 0 20px var(--hextech); margin: 0; text-align: center; }
 #augment-cards-container { display: flex; gap: 30px; justify-content: center; align-items: stretch; flex-wrap: wrap; }
-.aug-card { width: 220px; height: 320px; background: linear-gradient(145deg, #1a2a3a, #10151a); border: 2px solid #444; border-radius: 12px; display: flex; flex-direction: column; align-items: center; padding: 20px; cursor: pointer; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden; }
+
+/* --- MỚI: Nút X (Bên trái nút Fullscreen) --- */
+#btn-close-aug {
+    position: fixed;
+    top: 10px;
+    right: 50px; /* Cách lề phải 50px để chừa chỗ cho nút Fullscreen (10px margin + 32px width + gap) */
+    width: 32px;
+    height: 32px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid #555;
+    color: #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    z-index: 10001; /* Trên cùng */
+    font-size: 1.2rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.2s;
+    outline: none;
+}
+#btn-close-aug:hover {
+    background: rgba(231, 76, 60, 0.8);
+    border-color: #e74c3c;
+    color: white;
+    transform: scale(1.1);
+}
+
+/* --- RESPONSIVE CARD SIZE (MẶC ĐỊNH NHỎ) --- */
+.aug-card { 
+    width: 140px; 
+    height: 200px; 
+    background: linear-gradient(145deg, #1a2a3a, #10151a); 
+    border: 2px solid #444; 
+    border-radius: 12px; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    padding: 10px; 
+    cursor: pointer; 
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
+    position: relative; 
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
+    overflow: hidden; 
+}
+.aug-icon { font-size: 2.5rem; margin-bottom: 10px; filter: drop-shadow(0 0 10px rgba(255,255,255,0.3)); transition: transform 0.3s; }
+.aug-name { font-size: 0.85rem; margin-bottom: 5px; }
+.aug-desc { font-size: 0.7rem; }
+
+/* --- RESPONSIVE: MÀN HÌNH TO (PC) --- */
+@media screen and (min-width: 1024px) {
+    .aug-card { width: 220px; height: 320px; padding: 20px; }
+    .aug-icon { font-size: 4rem; margin-bottom: 20px; }
+    .aug-name { font-size: 1.1rem; margin-bottom: 10px; }
+    .aug-desc { font-size: 0.85rem; }
+}
+
 .aug-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 40%, rgba(10, 205, 227, 0.1)); pointer-events: none; }
 .aug-card:hover { transform: translateY(-15px) scale(1.05); border-color: var(--hextech); box-shadow: 0 0 30px rgba(10, 205, 227, 0.4); }
 .aug-card.selecting { animation: flash 0.5s infinite; border-color: white; }
 .aug-card.flying { transition: 0.5s; transform: scale(0); opacity: 0; }
-.aug-icon { font-size: 4rem; margin-bottom: 20px; filter: drop-shadow(0 0 10px rgba(255,255,255,0.3)); transition: transform 0.3s; }
 .aug-card:hover .aug-icon { transform: scale(1.2); }
-.aug-name { color: white; font-weight: bold; font-size: 1.1rem; text-transform: uppercase; margin-bottom: 10px; text-align: center; color: var(--hextech); }
-.aug-desc { color: #ccc; font-size: 0.85rem; text-align: center; line-height: 1.4; flex: 1; display: flex; justify-content: center; align-items: center; }
-.aug-card.info-only { width: 160px; height: 220px; cursor: default; }
+.aug-name { color: white; font-weight: bold; text-transform: uppercase; text-align: center; color: var(--hextech); }
+.aug-desc { color: #ccc; text-align: center; line-height: 1.4; flex: 1; display: flex; justify-content: center; align-items: center; }
+.aug-card.info-only { cursor: default; }
 .aug-card.info-only:hover { transform: none; border-color: #444; box-shadow: none; }
-#btn-close-aug { position: absolute; top: -40px; right: 20px; background: none; border: 2px solid #666; color: #aaa; width: 40px; height: 40px; border-radius: 50%; font-size: 1.5rem; cursor: pointer; transition: 0.2s; display: flex; justify-content: center; align-items: center; }
-#btn-close-aug:hover { border-color: white; color: white; transform: rotate(90deg); }
 
 @keyframes flash { 0% { border-color: var(--hextech); background: #1a2a3a; } 50% { border-color: white; background: #2a3a4a; } 100% { border-color: var(--hextech); background: #1a2a3a; } }
 
@@ -294,7 +354,7 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px;
     }
 }
 
-/* --- PC MODE STYLES (MỚI) --- */
+/* --- PC MODE STYLES --- */
 #shop-wrapper.pc-mode {
     top: auto;
     bottom: 20px;
@@ -310,4 +370,189 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px;
     width: 20px; height: 20px; 
     accent-color: var(--gold); 
     cursor: pointer;
+}
+
+/* --- COLLECTION FEATURE --- */
+
+/* Nút mở bộ sưu tập ở Lobby (Giữa bên trái) */
+#lobby-collection-btn {
+    position: absolute;
+    top: 50%;
+    left: 20px;
+    transform: translateY(-50%);
+    width: 60px;
+    height: 60px;
+    background: rgba(10, 15, 20, 0.9);
+    border: 2px solid #c8aa6e;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(0,0,0,0.8);
+    transition: all 0.2s;
+    z-index: 250; /* Cao hơn hình nền lobby */
+    color: #c8aa6e;
+}
+
+#lobby-collection-btn:hover {
+    transform: translateY(-50%) scale(1.1);
+    background: #1e2328;
+    box-shadow: 0 0 25px #c8aa6e;
+}
+
+#lobby-collection-btn span { font-size: 1.8rem; margin-bottom: 2px; }
+#lobby-collection-btn small { font-size: 0.5rem; font-weight: bold; }
+
+/* Modal Bộ Sưu Tập */
+.collection-box {
+    width: 90vw;
+    height: 85vh;
+    max-width: 1000px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #101215;
+}
+
+.collection-box h2 {
+    margin: 15px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #444;
+    flex-shrink: 0;
+}
+
+.close-btn {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+.close-btn:hover { color: #fff; }
+
+/* Layout 2 cột */
+.collection-layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden; /* Quan trọng để cuộn bên trong */
+    border-top: 1px solid #333;
+}
+
+/* Sidebar bên trái */
+.collection-sidebar {
+    width: 150px;
+    background: rgba(0,0,0,0.3);
+    border-right: 1px solid #444;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    gap: 10px;
+}
+
+.col-tab {
+    background: transparent;
+    border: 1px solid #444;
+    color: #888;
+    padding: 15px;
+    text-align: left;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.2s;
+    border-radius: 4px;
+}
+
+.col-tab:hover { background: rgba(255,255,255,0.05); color: #ccc; }
+.col-tab.active {
+    background: linear-gradient(90deg, rgba(200, 170, 110, 0.2), transparent);
+    border-color: #c8aa6e;
+    color: #c8aa6e;
+    border-left: 4px solid #c8aa6e;
+}
+
+/* Nội dung bên phải */
+.collection-content {
+    flex: 1;
+    overflow-y: auto; /* Cho phép cuộn dọc */
+    padding: 20px;
+    background: rgba(20, 25, 30, 0.5);
+}
+
+/* Scrollbar đẹp */
+.collection-content::-webkit-scrollbar { width: 8px; }
+.collection-content::-webkit-scrollbar-track { background: #000; }
+.collection-content::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+
+/* Nhóm Tướng theo Hệ */
+.trait-group { margin-bottom: 30px; }
+.trait-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 5px;
+    margin-bottom: 15px;
+}
+.trait-name { color: #f1c40f; font-size: 1.2rem; font-weight: bold; text-transform: uppercase; }
+
+/* Grid hiển thị tướng/đồ */
+.collection-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+/* Card Tướng/Đồ trong bộ sưu tập */
+.col-card {
+    width: 80px;
+    height: 100px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    transition: 0.2s;
+}
+
+/* LOGIC KHÓA MÀU (GRAYSCALE) */
+.col-card.locked {
+    filter: grayscale(100%);
+    opacity: 0.5;
+}
+.col-card.locked::after {
+    content: "🔒";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.5rem;
+    opacity: 0.7;
+}
+
+.col-card.unlocked {
+    border-color: #c8aa6e;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    transform: scale(1.02);
+}
+
+.col-img {
+    flex: 1;
+    border-radius: 5px 5px 0 0;
+    background-size: cover;
+    background-position: center;
+}
+.col-name {
+    font-size: 0.6rem;
+    text-align: center;
+    padding: 4px;
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

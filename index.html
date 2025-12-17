@@ -20,8 +20,34 @@
             <div class="edit-icon">✎</div>
         </div>
 
+        <div id="lobby-collection-btn">
+            <span>📖</span>
+            <small>BỘ SƯU TẬP</small>
+        </div>
+
         <div id="play-container">
             <button id="btn-lobby-play">ĐẤU NGAY</button>
+        </div>
+
+        <div id="collection-modal" class="modal-overlay hidden">
+            <div class="modal-content collection-box">
+                <button id="btn-close-collection" class="close-btn">✕</button>
+                <h2>THƯ VIỆN CỜ</h2>
+                
+                <div class="collection-layout">
+                    <div class="collection-sidebar">
+                        <button id="col-tab-champs" class="col-tab active">TƯỚNG</button>
+                        <button id="col-tab-items" class="col-tab">TRANG BỊ</button>
+                    </div>
+
+                    <div class="collection-content">
+                        <div id="col-view-champs" class="col-view">
+                            </div>
+                        <div id="col-view-items" class="col-view hidden">
+                            </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="mode-select-modal" class="modal-overlay hidden">
@@ -51,16 +77,16 @@
         </div>
     </div>
 
+    <div id="augment-modal" class="hidden">
+        <div id="aug-modal-content">
+            <button id="btn-close-aug" class="hidden">✕</button>
+            <h2 id="aug-modal-title" class="aug-title">LỰA CHỌN LÕI CÔNG NGHỆ</h2>
+            <div id="augment-cards-container"></div>
+        </div>
+    </div>
+
     <div id="game-ui" class="hidden">
         
-        <div id="augment-modal" class="hidden">
-            <div id="aug-modal-content">
-                <button id="btn-close-aug" class="hidden">✕</button>
-                <h2 id="aug-modal-title" class="aug-title">LỰA CHỌN LÕI CÔNG NGHỆ</h2>
-                <div id="augment-cards-container"></div>
-            </div>
-        </div>
-
         <div id="sidebar-panel">
             <div class="sidebar-tabs">
                 <button id="tab-btn-syn" class="tab-btn active">🛡️ Tộc Hệ</button>
@@ -111,7 +137,6 @@
         </div>
         
         <div id="controls-panel">
-            <button id="btn-zoom" class="action-btn zoom">🔍</button>
             <button id="btn-shop-toggle" class="action-btn shop">🛒</button>
             <button id="btn-settings" class="action-btn settings">⚙️</button>
         </div>

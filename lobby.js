@@ -1,6 +1,8 @@
 // lobby.js
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
 import { getDatabase, ref, set, get, child, update, remove, onDisconnect, onValue } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+// --- MỚI: IMPORT DỮ LIỆU ĐỂ HIỂN THỊ BỘ SƯU TẬP ---
+import { CHAMPS, SYNERGIES, ITEMS } from './shared.js';
 
 // 1. Cấu hình Firebase
 const firebaseConfig = {
@@ -20,9 +22,9 @@ const db = getDatabase(app);
 // 2. Quản lý User
 let currentUserId = localStorage.getItem('tft_uid');
 let currentUserName = "Kỳ Thủ Mới";
-
-// --- MỚI: Thêm pcMode vào cài đặt mặc định ---
-let userSettings = { uiScale: 1, zoomIdx: 1, pcMode: false }; 
+let userSettings = { uiScale: 1, zoomIdx: 1, pcMode: false };
+// --- BIẾN LƯU BỘ SƯU TẬP ---
+let userCollection = { champions: {}, items: {} };
 
 if (!currentUserId) {
     currentUserId = 'user_' + Math.random().toString(36).substr(2, 9);
@@ -36,6 +38,9 @@ const nameInputModal = document.getElementById('name-input-modal');
 const nameInput = document.getElementById('input-player-name');
 const modeSelectModal = document.getElementById('mode-select-modal');
 const btnPvp = document.getElementById('btn-mode-pvp');
+// --- DOM CHO COLLECTION ---
+const btnCollection = document.getElementById('lobby-collection-btn');
+const collectionModal = document.getElementById('collection-modal');
 
 // 3. Hàm Load dữ liệu
 async function loadUserData() {
@@ -45,20 +50,21 @@ async function loadUserData() {
         if (snapshot.exists()) {
             const data = snapshot.val();
             currentUserName = data.name || "Kỳ Thủ Mới";
-            // Load settings nếu có
-            if (data.settings) {
-                // Merge với default để đảm bảo có đủ field mới (như pcMode)
-                userSettings = { ...userSettings, ...data.settings };
+            if (data.settings) userSettings = { ...userSettings, ...data.settings };
+            
+            // --- TẢI BỘ SƯU TẬP ---
+            if (data.collection) {
+                userCollection = data.collection; // Cấu trúc: { champions: {garen: true}, items: {sword: true} }
+            } else {
+                userCollection = { champions: {}, items: {} };
             }
+
             updateNameDisplay();
         } else {
             showNameModal();
         }
     } catch (error) {
         console.error("Lỗi lấy data:", error);
-        if (error.code === 'PERMISSION_DENIED') {
-            alert("Lỗi quyền truy cập Firebase!");
-        }
         showNameModal(); 
     }
 }
@@ -67,7 +73,6 @@ function updateNameDisplay() {
     if(nameDisplay) nameDisplay.innerText = currentUserName;
 }
 
-// Lưu tên
 function saveName(newName) {
     if (!newName.trim()) return;
     currentUserName = newName;
@@ -80,18 +85,13 @@ function saveName(newName) {
     }).catch(err => console.error(err));
 }
 
-// Hàm lưu settings (Global)
 window.saveUserSettings = (newSettings) => {
-    // Merge setting mới vào setting cũ
     userSettings = { ...userSettings, ...newSettings };
-    // Update local variable for consistency
     window.userSettings = userSettings;
-    
     update(ref(db, 'users/' + currentUserId + '/settings'), userSettings)
         .catch(err => console.error("Lỗi lưu settings:", err));
 };
 
-// Export settings để logic.js dùng
 window.userSettings = userSettings;
 
 // 4. UI Logic
@@ -105,74 +105,155 @@ function hideNameModal() {
     if(nameInputModal) nameInputModal.classList.add('hidden');
 }
 
-// --- LOGIC PVP MATCHMAKING ---
-let matchingListener = null;
+// --- LOGIC BỘ SƯU TẬP (MỚI) ---
+function initCollectionUI() {
+    // 1. Xử lý mở/đóng Modal
+    if(btnCollection) {
+        btnCollection.classList.remove('hidden');
+        btnCollection.onclick = () => {
+            renderChampionsCollection(); // Mặc định render tướng trước
+            if(collectionModal) collectionModal.classList.remove('hidden');
+        };
+    }
+    
+    const closeBtn = document.getElementById('btn-close-collection');
+    if(closeBtn) closeBtn.onclick = () => collectionModal.classList.add('hidden');
 
+    // 2. Xử lý Tab chuyển đổi
+    const tabChamps = document.getElementById('col-tab-champs');
+    const tabItems = document.getElementById('col-tab-items');
+    const viewChamps = document.getElementById('col-view-champs');
+    const viewItems = document.getElementById('col-view-items');
+
+    if(tabChamps && tabItems) {
+        tabChamps.onclick = () => {
+            tabChamps.classList.add('active');
+            tabItems.classList.remove('active');
+            viewChamps.classList.remove('hidden');
+            viewItems.classList.add('hidden');
+            renderChampionsCollection();
+        };
+        tabItems.onclick = () => {
+            tabItems.classList.add('active');
+            tabChamps.classList.remove('active');
+            viewItems.classList.remove('hidden');
+            viewChamps.classList.add('hidden');
+            renderItemsCollection();
+        };
+    }
+}
+
+function renderChampionsCollection() {
+    const container = document.getElementById('col-view-champs');
+    if(!container) return;
+    container.innerHTML = '';
+
+    // Duyệt qua từng Tộc/Hệ trong SYNERGIES để gom nhóm
+    Object.keys(SYNERGIES).forEach(traitKey => {
+        const traitData = SYNERGIES[traitKey];
+        
+        // Tìm các tướng thuộc hệ này
+        const traitChamps = CHAMPS.filter(c => c.trait === traitKey);
+        
+        if(traitChamps.length > 0) {
+            // Tạo Header cho hệ
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'trait-group';
+            
+            const headerHtml = `
+                <div class="trait-header" style="border-color:${traitData.color}">
+                    <div class="trait-name" style="color:${traitData.color}">${traitData.name}</div>
+                </div>
+            `;
+            
+            // Tạo Grid chứa tướng
+            const gridDiv = document.createElement('div');
+            gridDiv.className = 'collection-grid';
+
+            traitChamps.forEach(champ => {
+                const isOwned = userCollection.champions && userCollection.champions[champ.id];
+                
+                const card = document.createElement('div');
+                card.className = `col-card ${isOwned ? 'unlocked' : 'locked'}`;
+                const colorHex = '#' + (champ.color ? champ.color.toString(16) : 'cccccc');
+                
+                card.innerHTML = `
+                    <div class="col-img" style="background-color: ${colorHex}"></div>
+                    <div class="col-name">${champ.name}</div>
+                `;
+                gridDiv.appendChild(card);
+            });
+
+            groupDiv.innerHTML = headerHtml;
+            groupDiv.appendChild(gridDiv);
+            container.appendChild(groupDiv);
+        }
+    });
+}
+
+function renderItemsCollection() {
+    const container = document.getElementById('col-view-items');
+    if(!container) return;
+    container.innerHTML = '';
+
+    const gridDiv = document.createElement('div');
+    gridDiv.className = 'collection-grid';
+    
+    // Lọc ra item hiển thị (có tên và icon)
+    Object.keys(ITEMS).forEach(itemId => {
+        const item = ITEMS[itemId];
+        if (!item.name) return;
+
+        const isOwned = userCollection.items && userCollection.items[itemId];
+        
+        const card = document.createElement('div');
+        card.className = `col-card ${isOwned ? 'unlocked' : 'locked'}`;
+        card.style.height = "80px"; 
+        
+        card.innerHTML = `
+            <div class="col-img" style="display:flex;justify-content:center;align-items:center;font-size:2rem;background:#222;">${item.icon}</div>
+            <div class="col-name" style="color:${item.color}">${item.name}</div>
+        `;
+        gridDiv.appendChild(card);
+    });
+    
+    container.appendChild(gridDiv);
+}
+
+// --- LOGIC PVP MATCHMAKING (GIỮ NGUYÊN) ---
+let matchingListener = null;
 async function findMatch() {
     const queueRef = ref(db, 'queue');
     const btnText = btnPvp.querySelector('h3');
     if(btnText) btnText.innerText = "Đang tìm...";
     
-    // 1. Kiểm tra xem có ai trong hàng chờ không
     const snapshot = await get(queueRef);
     let opponentFound = null;
 
     if (snapshot.exists()) {
         const queueData = snapshot.val();
-        // Tìm người khác mình
         const opponentKey = Object.keys(queueData).find(k => k !== currentUserId);
-        if (opponentKey) {
-            opponentFound = opponentKey;
-        }
+        if (opponentKey) opponentFound = opponentKey;
     }
 
     if (opponentFound) {
-        // 2. FOUND: Tạo trận đấu
         const matchId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         const opponentId = opponentFound;
-        
-        // Xóa opponent khỏi queue để không ai khác bắt được
         await remove(ref(db, `queue/${opponentId}`));
-
-        // Tạo dữ liệu trận đấu
-        const matchData = {
-            host: currentUserId,
-            guest: opponentId,
-            status: 'prep',
-            stage: 1,
-            subRound: 1,
-            lastUpdate: Date.now()
-        };
-        
+        const matchData = { host: currentUserId, guest: opponentId, status: 'prep', stage: 1, subRound: 1, lastUpdate: Date.now() };
         await set(ref(db, `matches/${matchId}`), matchData);
-
-        // Thông báo cho opponent (qua user node)
         update(ref(db, `users/${opponentId}`), { currentMatch: matchId });
-
-        // Mình vào game ngay (Role: Host)
         enterGame({ mode: 'pvp', matchId: matchId, role: 'host', opponentId: opponentId });
-        
     } else {
-        // 3. NOT FOUND: Tự thêm mình vào queue
         const myQueueRef = ref(db, `queue/${currentUserId}`);
-        await set(myQueueRef, {
-            name: currentUserName || "Unknown",
-            time: Date.now()
-        });
-        
-        // Xóa khỏi queue khi disconnect (tránh rác)
+        await set(myQueueRef, { name: currentUserName || "Unknown", time: Date.now() });
         onDisconnect(myQueueRef).remove();
-
-        // Lắng nghe xem có ai mời vào trận không
         const myUserRef = ref(db, `users/${currentUserId}/currentMatch`);
         matchingListener = onValue(myUserRef, (snap) => {
             const matchId = snap.val();
             if (matchId) {
-                // Opponent đã tạo phòng -> Mình vào
-                remove(myQueueRef); // Xóa mình khỏi queue
-                update(ref(db, `users/${currentUserId}`), { currentMatch: null }); // Reset trigger
-                
-                // Lấy thông tin trận để biết opponent là ai (Host)
+                remove(myQueueRef); 
+                update(ref(db, `users/${currentUserId}`), { currentMatch: null }); 
                 get(ref(db, `matches/${matchId}`)).then(mSnap => {
                     const mData = mSnap.val();
                     const opponentId = mData.host;
@@ -183,14 +264,12 @@ async function findMatch() {
     }
 }
 
-// 5. Vào Game (Cập nhật để nhận config)
 function enterGame(gameConfig = { mode: 'pve' }) {
-    if(matchingListener) {
-        matchingListener(); // Tắt listener tìm trận
-        matchingListener = null;
-    }
-
+    if(matchingListener) { matchingListener(); matchingListener = null; }
     if(lobbyScreen) lobbyScreen.classList.add('fade-out');
+    // Ẩn nút collection khi vào game
+    if(btnCollection) btnCollection.classList.add('hidden');
+
     setTimeout(() => {
         if(lobbyScreen) lobbyScreen.classList.add('hidden');
         const gui = document.getElementById('game-ui');
@@ -198,9 +277,7 @@ function enterGame(gameConfig = { mode: 'pve' }) {
         const sell = document.getElementById('sell-slot');
         if(sell) sell.classList.remove('hidden');
         
-        // Gọi hàm start game và TRUYỀN SETTINGS + CONFIG PVP
         if (window.initTFTGame) {
-            // Merge settings UI và config Game
             const fullConfig = { 
                 ...window.userSettings, 
                 ...gameConfig, 
@@ -212,9 +289,9 @@ function enterGame(gameConfig = { mode: 'pve' }) {
     }, 500);
 }
 
-// Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
     loadUserData();
+    initCollectionUI(); // Khởi tạo UI Collection
 
     const profileBox = document.getElementById('user-profile-box');
     if(profileBox) profileBox.onclick = () => showNameModal();
@@ -223,51 +300,28 @@ document.addEventListener('DOMContentLoaded', () => {
     if(btnConfirm) btnConfirm.onclick = () => saveName(nameInput.value);
 
     const btnPlay = document.getElementById('btn-lobby-play');
-    if(btnPlay) btnPlay.onclick = () => {
-        if(modeSelectModal) modeSelectModal.classList.remove('hidden');
-    };
+    if(btnPlay) btnPlay.onclick = () => { if(modeSelectModal) modeSelectModal.classList.remove('hidden'); };
 
-    if(modeSelectModal) {
-        modeSelectModal.onclick = (e) => {
-            if (e.target === modeSelectModal) modeSelectModal.classList.add('hidden');
-        };
-    }
+    if(modeSelectModal) { modeSelectModal.onclick = (e) => { if (e.target === modeSelectModal) modeSelectModal.classList.add('hidden'); }; }
 
     const btnPve = document.getElementById('btn-mode-pve');
     if(btnPve) btnPve.onclick = () => enterGame({ mode: 'pve' });
 
-    // Enable nút PvP
-    if(btnPvp) {
-        btnPvp.classList.remove('disabled');
-        btnPvp.onclick = () => findMatch();
-    }
+    if(btnPvp) { btnPvp.classList.remove('disabled'); btnPvp.onclick = () => findMatch(); }
 
-    // --- LOGIC FULLSCREEN GLOBAL ---
     const btnFs = document.getElementById('btn-global-fullscreen');
     if (btnFs) {
         btnFs.onclick = () => {
             if (!document.fullscreenElement) {
-                // Xin quyền Fullscreen
-                document.documentElement.requestFullscreen().catch((err) => {
-                    console.error(`Lỗi khi bật Fullscreen: ${err.message}`);
-                });
+                document.documentElement.requestFullscreen().catch((err) => console.error(err));
                 btnFs.innerText = '✕';
             } else {
-                // Thoát Fullscreen
-                if (document.exitFullscreen) {
-                    document.exitFullscreen();
-                }
+                if (document.exitFullscreen) document.exitFullscreen();
                 btnFs.innerText = '⛶';
             }
         };
-
-        // Lắng nghe sự kiện thay đổi (ví dụ người dùng bấm ESC) để cập nhật icon
         document.addEventListener('fullscreenchange', () => {
-            if (!document.fullscreenElement) {
-                btnFs.innerText = '⛶';
-            } else {
-                btnFs.innerText = '✕';
-            }
+            if (!document.fullscreenElement) btnFs.innerText = '⛶'; else btnFs.innerText = '✕';
         });
     }
 });
