@@ -3,6 +3,10 @@ import { Unit, ViewManager } from './engine.js';
 import { UnitFactory } from './3d.js'; 
 import { ref, update, onValue, set, off, get } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
 
+// Cấu hình Fixed Time Step
+const FIXED_TIME_STEP = 1 / 30; // Logic chạy 30 lần/giây (0.0333s)
+const MAX_FRAME_TIME = 0.25; // Giới hạn để tránh lag giật khi tab không active
+
 function createIconTexture(text, color) {
     const canvas = document.createElement('canvas');
     canvas.width = 128; canvas.height = 128;
@@ -49,15 +53,15 @@ export class GameManager {
     constructor(settings) {
         this.settings = settings || {};
         this.mode = this.settings.mode || 'pve'; 
+        this.pcMode = this.settings.pcMode || false; // MỚI: Check chế độ PC
+        
         this.db = this.settings.db;
         this.matchId = this.settings.matchId;
         this.myId = this.settings.myId || 'local_player';
         this.opponentId = this.settings.opponentId;
 
         // --- RNG SETUP ---
-        // 1. Shop RNG: Dùng riêng cho mỗi người (Shop, Lõi, Rớt đồ)
         this.shopRNG = new SeededRNG(this.myId);
-        // 2. Combat RNG: Sẽ được khởi tạo đồng bộ khi startCombat
         this.combatRNG = null;
 
         this.units = []; this.hexes = []; this.interestOrbs = [];
@@ -67,14 +71,14 @@ export class GameManager {
         this.gold = 4; this.lvl = 1; this.xp = 0; this.php = 100; this.ehp = 100; 
         this.stage = 1; this.subRound = 1; this.phase = 'prep';
         this.timer = TIMERS.PREP; 
-        this.lastTime = 0; 
+        this.lastTime = 0;
+        this.accumulator = 0; 
         
         this.isWaiting = false;
         this.isPvpLoading = false; 
         this.pendingResult = null;
 
         const components = Object.keys(ITEMS).filter(key => ITEMS[key].isComponent);
-        // Dùng shopRNG để random item khởi đầu
         const randomStartItem = components[Math.floor(this.shopRNG.next() * components.length)];
         this.inventory = [randomStartItem];
 
@@ -86,6 +90,10 @@ export class GameManager {
         this.dragged = null; this.dragGroup = null; this.hoveredHex = null;
         this.dragItem = null; this.dragItemEl = null;
         this.ray = new THREE.Raycaster(); this.mouse = new THREE.Vector2();
+        
+        // MỚI: Theo dõi vị trí chuột cho phím E (Bán nhanh)
+        this.lastMouseX = 0;
+        this.lastMouseY = 0;
 
         this.view = new ViewManager(this);
 
@@ -107,27 +115,47 @@ export class GameManager {
 
     loop() {
         requestAnimationFrame(() => this.loop());
+        
         const now = performance.now();
-        const dt = (now - this.lastTime) / 1000; 
+        let frameTime = (now - this.lastTime) / 1000;
+        if (frameTime > MAX_FRAME_TIME) frameTime = MAX_FRAME_TIME; 
         this.lastTime = now;
 
-        if (this.isGameStarted && !this.isWaiting && !this.isPvpLoading) {
-            this.updateTimer(dt);
-            this.units.forEach(u => u.update(now * 0.001, this.units)); 
+        this.accumulator += frameTime;
+
+        while (this.accumulator >= FIXED_TIME_STEP) {
+            this.updateLogic(FIXED_TIME_STEP);
+            this.accumulator -= FIXED_TIME_STEP;
         }
 
-        this.view.updateCamera();
-        
+        this.renderVisuals(now);
+    }
+
+    updateLogic(dt) {
+        if (this.isGameStarted && !this.isWaiting && !this.isPvpLoading) {
+            this.updateTimer(dt);
+            this.units.forEach(u => u.update(dt, this.units)); 
+        }
+
         if(this.phase === 'combat' && !this.isWaiting && !this.isPvpLoading) {
             const playerLive = this.units.filter(u => u.team === 'player' && !u.isDead && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench).length;
             const enemyLive = this.units.filter(u => u.team === 'enemy' && !u.isDead).length;
             if (playerLive === 0) this.endCombat(false); 
             else if (enemyLive === 0) this.endCombat(true); 
         }
-
-        for(let i=this.vfxList.length-1; i>=0; i--) { if(!this.vfxList[i].update()) { this.vfxList.splice(i, 1); } }
-        for(let i=this.projList.length-1; i>=0; i--) { if(!this.projList[i].update()) { this.projList.splice(i, 1); } }
         
+        for(let i=this.projList.length-1; i>=0; i--) { 
+            if(!this.projList[i].update(dt)) { this.projList.splice(i, 1); } 
+        }
+    }
+
+    renderVisuals(now) {
+        this.view.updateCamera();
+        
+        for(let i=this.vfxList.length-1; i>=0; i--) { if(!this.vfxList[i].update()) { this.vfxList.splice(i, 1); } }
+        
+        this.units.forEach(u => u.updateVisuals(now * 0.001));
+
         const maxInterest = this.augments.find(a => a.id === 'rich_get_richer') ? 7 : 5;
         const interest = Math.min(Math.floor(this.gold / 10), maxInterest);
         this.interestOrbs.forEach((orb, i) => { 
@@ -208,7 +236,6 @@ export class GameManager {
         const group = UnitFactory.createUnitGroup(data, hex, team);
         this.view.scene.add(group);
         const unit = new Unit(group, data, team, this);
-        // Nếu đang trong combat hoặc đã có combatRNG, gán cho unit mới luôn
         if (this.combatRNG) unit.setRNG(this.combatRNG);
         this.units.push(unit);
         return unit;
@@ -224,6 +251,24 @@ export class GameManager {
         this.calcSyn();
         this.view.updateUI();
         return true;
+    }
+
+    // MỚI: Hàm mua kinh nghiệm (Tách ra để dùng cho phím tắt)
+    buyXP() {
+        if (this.gold >= 4 && this.lvl < 9) {
+            this.gold -= 4;
+            this.xp += 4;
+            if (this.xp >= this.getXpNeed()) {
+                this.xp -= this.getXpNeed();
+                this.lvl++;
+            }
+            this.view.updateUI();
+            this.view.toast("Đã mua Kinh Nghiệm");
+        } else if (this.lvl >= 9) {
+            this.view.toast("Đã đạt cấp tối đa!");
+        } else {
+            this.view.toast("Không đủ vàng!");
+        }
     }
 
     sellUnit(mesh) {
@@ -243,6 +288,26 @@ export class GameManager {
             this.view.toast(`Bán +${refund}g`);
             this.calcSyn();
             this.view.updateUI();
+        }
+    }
+
+    // MỚI: Hàm bán unit đang được trỏ chuột vào (cho phím E)
+    sellHoveredUnit() {
+        if (!this.pcMode) return;
+        this.updateRay(this.lastMouseX, this.lastMouseY);
+        const hits = this.ray.intersectObjects(this.view.scene.children, true);
+        const unitHit = hits.find(h => h.object.name === 'hitbox' && h.object.userData.team === 'player');
+        
+        if (unitHit) {
+            const unit = this.units.find(u => u.group === unitHit.object.parent);
+            // Chỉ bán được tướng khi đang ở Prep phase hoặc tướng trên hàng chờ
+            const isBench = unitHit.object.userData.hex.userData.isBench;
+            if (this.phase === 'prep' || isBench) {
+                this.sellUnit(unitHit.object);
+                this.view.closeInspector(); // Đóng inspector nếu đang soi con đó
+            } else {
+                this.view.toast("Không thể bán khi đang chiến đấu!");
+            }
         }
     }
 
@@ -280,7 +345,8 @@ export class GameManager {
             this.updateGhostPos(e);
         }
     }
-        async startCombat() {
+
+    async startCombat() {
         if(this.phase === 'combat') return;
         const active = this.units.filter(u=>u.team==='player' && !u.group.children.find(c=>c.name==='hitbox').userData.hex.userData.isBench);
         if(!active.length) { this.view.toast("Không có tướng! Tự động thua."); }
@@ -289,16 +355,10 @@ export class GameManager {
         this.timer = TIMERS.COMBAT; 
         this.updateUIPhase(true); 
         
-        // --- ĐỒNG BỘ RNG CHO COMBAT (CRIT, SKILL, TARGET) ---
-        // Tạo seed chung dựa trên MatchID + Stage + SubRound
-        // Cả 2 người chơi sẽ có seed giống hệt nhau ở round này -> Kết quả combat giống nhau
         const seedKey = `${this.matchId}_${this.stage}_${this.subRound}`;
         this.combatRNG = new SeededRNG(seedKey);
-        
-        // Gán RNG chung cho tất cả các unit hiện có
         this.units.forEach(u => u.setRNG(this.combatRNG));
 
-        // Xóa unit địch cũ
         this.units.filter(u=>u.team==='enemy').forEach(u=>u.destroy()); 
         this.units = this.units.filter(u=>u.team==='player'); 
         
@@ -308,7 +368,19 @@ export class GameManager {
         } else {
             await this.spawnPvpOpponent(active);
         }
+        
+        this.sortUnitsDeterministic();
         this.view.closeInspector();
+    }
+    
+    sortUnitsDeterministic() {
+        this.units.sort((a, b) => {
+            if (a.data.id !== b.data.id) return a.data.id.localeCompare(b.data.id);
+            const posA = a.group.position;
+            const posB = b.group.position;
+            if (Math.abs(posA.x - posB.x) > 0.1) return posA.x - posB.x;
+            return posA.z - posB.z;
+        });
     }
 
     spawnPveEnemies(monsterList) {
@@ -369,12 +441,11 @@ export class GameManager {
     spawnBotFallback() {
         this.view.toast("PVP START (vs BOT)!");
         const enemyHexes = this.hexes.filter(h => !h.userData.isPlayer && !h.userData.occupied);
-        // Bot random thì dùng shopRNG cũng được để nó cố định theo người chơi
         const shuffledHexes = enemyHexes.sort(() => 0.5 - this.shopRNG.next());
         let botLvl = Math.min(this.stage + 2, 9);
         for(let i=0; i < botLvl; i++) {
             if(shuffledHexes[i]) {
-                const botUnitData = this.rollChamp(botLvl); // Đã dùng shopRNG bên trong
+                const botUnitData = this.rollChamp(botLvl); 
                 const enemy = this.createUnit(botUnitData, shuffledHexes[i], 'enemy');
                 const r = this.shopRNG.next();
                 let targetStar = 1;
@@ -512,7 +583,6 @@ export class GameManager {
         title.innerText = "LỰA CHỌN LÕI CÔNG NGHỆ";
         container.innerHTML = ''; 
         const choices = [];
-        // Dùng shopRNG để chọn Augment
         for (let i = 0; i < 3; i++) {
             if (this.augmentPool.length === 0) break;
             const idx = Math.floor(this.shopRNG.next() * this.augmentPool.length);
@@ -575,7 +645,6 @@ export class GameManager {
                     if (aug.type === 'item') {
                         const allItems = Object.keys(ITEMS);
                         const candidates = aug.id === 'secret_weapon' ? allItems.filter(k => ITEMS[k].isComponent) : allItems.filter(k => !ITEMS[k].isComponent);
-                        // Dùng shopRNG cho reward ngẫu nhiên
                         const reward = candidates[Math.floor(this.shopRNG.next() * candidates.length)];
                         if (this.inventory.length < 8) this.inventory.push(reward); else { this.gold += 5; this.view.toast("Túi đầy -> +5 vàng"); }
                         this.view.renderInventory();
@@ -592,7 +661,6 @@ export class GameManager {
     }
 
     onMonsterDeath(monster) {
-        // Dùng shopRNG cho tỉ lệ rơi đồ
         if (this.shopRNG.next() < 0.3) {
             const componentKeys = Object.keys(ITEMS).filter(k => ITEMS[k].isComponent);
             const randomItem = componentKeys[Math.floor(this.shopRNG.next() * componentKeys.length)];
@@ -620,7 +688,6 @@ export class GameManager {
                 const spawnHex = this.hexes[mirrorIdx];
                 if (spawnHex) {
                     const enemy = this.createUnit(champData, spawnHex, 'enemy');
-                    // Gán combatRNG cho enemy
                     if(this.combatRNG) enemy.setRNG(this.combatRNG);
                     enemy.star = 1; for(let i=1; i<ud.star; i++) enemy.upgradeStar();
                     enemy.items = ud.items || []; enemy.updateStats();
@@ -643,10 +710,39 @@ export class GameManager {
         window.addEventListener('touchmove', handler, opts);
         window.addEventListener('touchend', handler, opts);
         
+        // MỚI: Đăng ký sự kiện bàn phím
+        window.addEventListener('keydown', (e) => this.handleKeyDown(e));
+
         const closeAug = document.getElementById('btn-close-aug');
         if(closeAug) closeAug.onclick = () => { document.getElementById('augment-modal').classList.add('hidden'); };
     }
     
+    // MỚI: Xử lý phím tắt PC Mode
+    handleKeyDown(e) {
+        if (!this.pcMode || !this.isGameStarted) return;
+        
+        // Không xử lý nếu đang nhập tên (mặc dù trong game không có input nào active ngoại trừ lúc đặt tên ở lobby)
+        if (e.target.tagName === 'INPUT') return;
+
+        switch(e.code) {
+            case 'KeyD': // Roll
+                if (this.gold >= 2) {
+                    this.gold -= 2;
+                    this.refreshShop();
+                    this.view.updateUI();
+                } else {
+                    this.view.toast("Không đủ vàng!");
+                }
+                break;
+            case 'KeyR': // Mua XP
+                this.buyXP();
+                break;
+            case 'KeyE': // Bán nhanh
+                this.sellHoveredUnit();
+                break;
+        }
+    }
+
     handleInput(e) {
         if (!this.isGameStarted) return;
         const isTouch = e.type.startsWith('touch');
@@ -661,6 +757,10 @@ export class GameManager {
         
         if (cx === undefined || isNaN(cx)) return;
         
+        // Cập nhật vị trí chuột cuối cùng cho Raycaster (dùng cho phím E)
+        this.lastMouseX = cx;
+        this.lastMouseY = cy;
+
         const fakeEvent = { clientX: cx, clientY: cy, target: e.target };
         
         if(e.type === 'mousedown' || e.type === 'touchstart') this.onDown(fakeEvent);
@@ -824,11 +924,9 @@ export class GameManager {
 
     rollChamp(lvl) {
         const odds = SHOP_ODDS[lvl] || [100,0,0,0];
-        // Dùng shopRNG cho tỉ lệ shop
         const r = this.shopRNG.next()*100;
         let cost=1; let sum=0; for(let i=0; i<4; i++) { sum+=odds[i]; if(r<=sum) { cost=i+1; break; } }
         const pool = CHAMPS.filter(c=>c.cost===cost); 
-        // Dùng shopRNG để chọn tướng cụ thể
         return pool.length ? pool[Math.floor(this.shopRNG.next()*pool.length)] : CHAMPS[0];
     }
     getXpNeed() { return XP_TO_LEVEL[this.lvl] || 9999; }
@@ -846,8 +944,16 @@ window.initTFTGame = (userSettings) => {
                 document.documentElement.style.setProperty('--ui-scale', userSettings.uiScale);
                 const slider = document.getElementById('ui-scale-slider');
                 const text = document.getElementById('ui-scale-text');
-                if(slider && text) { const pct = Math.round(userSettings.uiScale * 50); slider.value = pct; text.innerText = pct + "%"; }
+                if(slider && text) { const pct = Math.round(userSettings.uiScale * 50); slider.value = pct + "%"; }
             }
+            // MỚI: Áp dụng PC Mode nếu đang bật
+            if (userSettings.pcMode) {
+                const shop = document.getElementById('shop-wrapper');
+                const check = document.getElementById('pc-mode-check');
+                if (shop) shop.classList.add('pc-mode');
+                if (check) check.checked = true;
+            }
+            
             if (userSettings.zoomIdx !== undefined) {
                 window.gameInstance.view.zoomIdx = userSettings.zoomIdx;
                 window.gameInstance.view.targetPos = window.gameInstance.view.zoomLevels[userSettings.zoomIdx].pos.clone();

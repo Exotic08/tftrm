@@ -20,8 +20,9 @@ const db = getDatabase(app);
 // 2. Quản lý User
 let currentUserId = localStorage.getItem('tft_uid');
 let currentUserName = "Kỳ Thủ Mới";
-// Mặc định settings
-let userSettings = { uiScale: 1, zoomIdx: 1 }; 
+
+// --- MỚI: Thêm pcMode vào cài đặt mặc định ---
+let userSettings = { uiScale: 1, zoomIdx: 1, pcMode: false }; 
 
 if (!currentUserId) {
     currentUserId = 'user_' + Math.random().toString(36).substr(2, 9);
@@ -46,7 +47,8 @@ async function loadUserData() {
             currentUserName = data.name || "Kỳ Thủ Mới";
             // Load settings nếu có
             if (data.settings) {
-                userSettings = data.settings;
+                // Merge với default để đảm bảo có đủ field mới (như pcMode)
+                userSettings = { ...userSettings, ...data.settings };
             }
             updateNameDisplay();
         } else {
@@ -78,7 +80,7 @@ function saveName(newName) {
     }).catch(err => console.error(err));
 }
 
-// --- MỚI: HÀM LƯU SETTINGS ---
+// Hàm lưu settings (Global)
 window.saveUserSettings = (newSettings) => {
     // Merge setting mới vào setting cũ
     userSettings = { ...userSettings, ...newSettings };

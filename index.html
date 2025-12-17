@@ -136,10 +136,20 @@
 
         <div id="settings-modal" class="hidden">
             <div class="settings-header">Cài Đặt</div>
+            
             <div class="settings-row">
                 <div class="settings-label"><span>Giao diện (UI)</span><span id="ui-scale-text">50%</span></div>
                 <input type="range" id="ui-scale-slider" min="50" max="100" value="50">
             </div>
+
+            <div class="settings-row" style="display:flex; justify-content:space-between; align-items:center; margin-top:15px;">
+                <div class="settings-label" style="margin:0; text-align: left;">
+                    <span style="display:block;">Chế độ PC</span>
+                    <div style="font-size: 0.65rem; color: #888; font-style: italic; margin-top:2px;">(D: Roll, R: XP, E: Bán)</div>
+                </div>
+                <input type="checkbox" id="pc-mode-check" class="settings-checkbox">
+            </div>
+
             <button id="btn-close-settings">Đóng</button>
         </div>
     </div>
